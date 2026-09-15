@@ -37,6 +37,8 @@ class igQtAiChatWidget;
 class igQtCommandManager;
 class igQtChromeFramelessDialog;
 class igQtPartFocusWidget;
+class igQtResampleToImageWidget;
+class igQtPointSetToOctreeWidget;
 
 class IG_QT_MODULE_EXPORT igQtMainWindow : public QMainWindow {
     Q_OBJECT
@@ -104,6 +106,13 @@ public:
     // 零件聚焦弹窗
     igQtChromeFramelessDialog* partFocusDialog{nullptr};
     igQtPartFocusWidget* partFocusWidget{nullptr};
+
+    // 重采样到图像参数面板
+    QDockWidget* ResampleToImageDockWidget{nullptr};
+    igQtResampleToImageWidget* ResampleToImageWidget{nullptr};
+    // 点集转八叉树参数面板
+    QDockWidget* PointSetToOctreeDockWidget{nullptr};
+    igQtPointSetToOctreeWidget* PointSetToOctreeWidget{nullptr};
 
 private slots:
     void updateRecentFilePaths();

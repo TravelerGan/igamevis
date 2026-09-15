@@ -29,6 +29,7 @@
 #include <cmath>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -628,6 +629,55 @@ static void TestOctreeParity() {
     std::cout << "         totalCount=" << totalCount << " (input " << kNumPoints << ")\n";
     Check(std::fabs(totalCount - static_cast<double>(kNumPoints)) < 0.5,
           "所有体素 Count 之和 = 输入点数");
+
+    // ---- VTK 特有的 octree 8 位占用编码：以「体素中心」为界，位权 1/2/4/16 按位或累加 ----
+    {
+        std::vector<unsigned char> refOctree(nCells, 0);
+        for (int i = 0; i < kNumPoints; ++i) {
+            const int i0 = ijkOf(pts[i][0], ox, sx, nx);
+            const int j0 = ijkOf(pts[i][1], oy, sy, ny);
+            const int k0 = ijkOf(pts[i][2], oz, sz, nz);
+            const IGsize cid = static_cast<IGsize>(i0) + static_cast<IGsize>(j0) * extentX +
+                               static_cast<IGsize>(k0) * extentX * extentY;
+            if (cid >= nCells) continue;
+            // 体素中心 = 原点 + ijk*spacing + spacing/2（VTK 在中心处比较，而非格点处）
+            const double cx = ox + i0 * sx + 0.5 * sx;
+            const double cy = oy + j0 * sy + 0.5 * sy;
+            const double cz = oz + k0 * sz + 0.5 * sz;
+            unsigned int v = (pts[i][0] > cx ? 2u : 1u);
+            v *= (pts[i][1] > cy ? 4u : 1u);
+            v *= (pts[i][2] > cz ? 16u : 1u);
+            refOctree[cid] |= static_cast<unsigned char>(v);
+        }
+        IGsize octMismatch = 0;
+        for (IGsize c = 0; c < nCells; ++c) {
+            const unsigned char got = static_cast<unsigned char>(octree->GetElementValue(c, 0));
+            if (got != refOctree[c]) ++octMismatch;
+        }
+        Check(octMismatch == 0,
+              "octree 占用位编码与独立复算一致（以体素中心为界、位权 1/2/4/16 按位或）");
+    }
+
+    // ---- 空体素的默认值：VTK 为 Min=FLT_MAX、Max=FLT_LOWEST、Count/Sum/Mean=0 ----
+    {
+        const double fMax = static_cast<double>(std::numeric_limits<float>::max());
+        const double fLow = static_cast<double>(std::numeric_limits<float>::lowest());
+        IGsize emptyCells = 0;
+        IGsize badDefaults = 0;
+        for (IGsize c = 0; c < nCells; ++c) {
+            if (outField->GetElementValue(c, 2) != 0.0) continue; // Count != 0 即非空
+            ++emptyCells;
+            const bool ok = outField->GetElementValue(c, 0) == fMax &&
+                            outField->GetElementValue(c, 1) == fLow &&
+                            outField->GetElementValue(c, 3) == 0.0 &&
+                            outField->GetElementValue(c, 4) == 0.0;
+            if (!ok) ++badDefaults;
+        }
+        std::cout << "         emptyCells=" << emptyCells << " badDefaults=" << badDefaults << "\n";
+        Check(emptyCells > 0, "存在空体素（用于验证默认值语义）");
+        Check(badDefaults == 0,
+              "空体素默认值与 VTK 一致（Min=FLT_MAX、Max=FLT_LOWEST、Count/Sum/Mean=0，非 NaN）");
+    }
 
     // 关闭「处理点属性」时只输出 octree 编码
     {

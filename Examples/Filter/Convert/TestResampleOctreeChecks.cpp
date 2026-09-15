@@ -705,11 +705,111 @@ static void TestOctreeParity() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// I. 线性场再现：同时验证「单元搜索」与「插值权重」
+//    四面体上使用线性场 f = 3x + 5y + 7z，任意有效格点的插值结果必须精确等于
+//    该点处的解析值——这是最能暴露权重错误的判据（权重错则偏差量级为 O(1)）。
+// ---------------------------------------------------------------------------
+static void TestLinearReproduction() {
+    std::cout << "\n=== I. 线性场再现（四面体 + f = 3x+5y+7z，验证插值权重）===\n";
+    std::vector<Point> pts = {Point(0.f, 0.f, 0.f), Point(1.f, 0.f, 0.f), Point(0.f, 1.f, 0.f),
+                              Point(0.f, 0.f, 1.f)};
+    std::vector<CellSpec> cells = {{{0, 1, 2, 3}, IG_TETRA}};
+    auto mesh = MakeMesh(pts, cells, std::string(), 0);
+    {
+        auto lin = FloatArray::New();
+        lin->SetName("lin");
+        lin->SetDimension(1);
+        lin->Resize(4);
+        for (int i = 0; i < 4; ++i) {
+            const double v = 3.0 * pts[i][0] + 5.0 * pts[i][1] + 7.0 * pts[i][2];
+            lin->SetElement(static_cast<IGsize>(i), &v);
+        }
+        mesh->GetAttributeSet()->AddAttribute(IG_SCALAR, IG_POINT, lin);
+    }
+
+    auto out = RunResampleExplicit(mesh);
+    Check(out != nullptr, "线性场网格重采样执行成功");
+    if (out == nullptr) return;
+    auto mask = FindArray(out, ResampleToImageFilter::GetMaskArrayName());
+    auto lin = FindArray(out, "lin");
+    Check(lin != nullptr && lin->GetArrayType() == IG_FloatArray, "输出保留线性场数组 lin");
+
+    IGsize valid = 0, bad = 0;
+    double worst = 0.0;
+    for (IGsize p = 0; p < out->GetNumberOfPoints(); ++p) {
+        if (mask->GetElementValue(p, 0) == 0.0) continue;
+        ++valid;
+        const Point& q = out->GetPoint(p);
+        const double expect = 3.0 * static_cast<double>(q[0]) + 5.0 * static_cast<double>(q[1]) +
+                              7.0 * static_cast<double>(q[2]);
+        const double got = lin->GetElementValue(p, 0);
+        const double diff = std::fabs(got - expect);
+        if (diff > worst) worst = diff;
+        if (diff > 1.0e-3) ++bad;
+    }
+    std::cout << "         validPoints=" << valid << " worstAbsError=" << worst << "\n";
+    Check(valid > 0, "存在有效格点用于验证插值");
+    Check(bad == 0, "线性场被精确再现（单元搜索与插值权重正确）");
+}
+
+// ---------------------------------------------------------------------------
+// J. 线性场再现：六面体（与 VTK 的 vtkHexahedron 权重路径对照）
+// ---------------------------------------------------------------------------
+static void TestLinearReproductionHexahedron() {
+    std::cout << "\n=== J. 线性场再现（六面体 + f = 3x+5y+7z）===\n";
+    std::vector<Point> pts = {Point(0.f, 0.f, 0.f), Point(1.f, 0.f, 0.f), Point(1.f, 1.f, 0.f),
+                              Point(0.f, 1.f, 0.f), Point(0.f, 0.f, 1.f), Point(1.f, 0.f, 1.f),
+                              Point(1.f, 1.f, 1.f), Point(0.f, 1.f, 1.f)};
+    std::vector<CellSpec> cells = {{{0, 1, 2, 3, 4, 5, 6, 7}, IG_HEXAHEDRON}};
+    auto mesh = MakeMesh(pts, cells, std::string(), 0);
+    {
+        auto lin = FloatArray::New();
+        lin->SetName("lin");
+        lin->SetDimension(1);
+        lin->Resize(8);
+        for (int i = 0; i < 8; ++i) {
+            const double v = 3.0 * pts[i][0] + 5.0 * pts[i][1] + 7.0 * pts[i][2];
+            lin->SetElement(static_cast<IGsize>(i), &v);
+        }
+        mesh->GetAttributeSet()->AddAttribute(IG_SCALAR, IG_POINT, lin);
+    }
+
+    auto filter = ResampleToImageFilter::New();
+    filter->SetInput(mesh);
+    filter->SetSamplingDimensions(3, 3, 3);
+    filter->SetUseInputBounds(false);
+    filter->SetSamplingBounds(0.0, 1.0, 0.0, 1.0, 0.0, 1.0);
+    Check(filter->Execute(), "六面体网格重采样执行成功");
+    auto out = DynamicCast<StructuredMesh>(filter->GetOutput(0));
+    if (out == nullptr) return;
+    auto mask = FindArray(out, ResampleToImageFilter::GetMaskArrayName());
+    auto lin = FindArray(out, "lin");
+
+    IGsize valid = 0, bad = 0;
+    double worst = 0.0;
+    for (IGsize p = 0; p < out->GetNumberOfPoints(); ++p) {
+        if (mask->GetElementValue(p, 0) == 0.0) continue;
+        ++valid;
+        const Point& q = out->GetPoint(p);
+        const double expect = 3.0 * static_cast<double>(q[0]) + 5.0 * static_cast<double>(q[1]) +
+                              7.0 * static_cast<double>(q[2]);
+        const double diff = std::fabs(lin->GetElementValue(p, 0) - expect);
+        if (diff > worst) worst = diff;
+        if (diff > 1.0e-3) ++bad;
+    }
+    std::cout << "         validPoints=" << valid << " worstAbsError=" << worst << "\n";
+    Check(valid == 27, "单位立方体内 3^3 采样格点全部有效");
+    Check(bad == 0, "六面体线性场被精确再现");
+}
+
 int main() {
     TestTetraBaseline();
     TestLowDimensionalCells();
     TestUnsupportedCells();
     TestAttributePolicy();
+    TestLinearReproduction();
+    TestLinearReproductionHexahedron();
     TestOctreeParity();
 
     std::cout << "\n================ 汇总 ================\n";

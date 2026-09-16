@@ -48,6 +48,8 @@
 #include <IQWidgets/igQtTensorWidget.h>
 #include <IQWidgets/igQtVariableCorrelationWidget.h>
 #include <IQWidgets/igQtPartFocusWidget.h>
+#include <IQWidgets/igQtPointSetToOctreeWidget.h>
+#include <IQWidgets/igQtResampleToImageWidget.h>
 #include <IQComponents/Dialog/igQtBoxSettingDialog.h>
 #include <IQComponents/Dialog/igQtChromeFramelessDialog.h>
 #include <iGameBlockMapping.h>
@@ -77,6 +79,7 @@
 #include <iGamePointFinder.h>
 #include <iGameSelectionParameter.h>
 #include <iGameUnstructuredMesh.h>
+#include <iGameStructuredMesh.h>
 #include <iGameVolumeMesh.h>
 #include <include/IQComponents/Dialog/igQtChangeBackGroundDialog.h>
 #include <include/IQComponents/Dialog/igQtMeshCodecDialog.h>
@@ -710,6 +713,41 @@ void igQtMainWindow::initAllUnDefinedComponents() {
     this->setCorner(Qt::BottomRightCorner, Qt::RightDockWidgetArea);
 
     modelTreeWidget = new igQtModelDialogWidget(this);
+
+    // ---- 重采样到图像（Resample To Image）参数面板 ----
+    ResampleToImageDockWidget = igQtResampleToImageWidget::createDockWidget(this);
+    ResampleToImageWidget =
+            qobject_cast<igQtResampleToImageWidget*>(ResampleToImageDockWidget->widget());
+    addDockWidget(Qt::RightDockWidgetArea, ResampleToImageDockWidget);
+    ResampleToImageDockWidget->resize(420, 620);
+    ResampleToImageDockWidget->hide();
+    connect(ResampleToImageWidget, &igQtResampleToImageWidget::closeRequested,
+            ResampleToImageDockWidget, &QDockWidget::hide);
+    connect(ResampleToImageWidget, &igQtResampleToImageWidget::resultReady, this,
+            [this](DataObject::Pointer result) {
+                if (result == nullptr) return;
+                // 渲染时 ModelGeometryFilter 读取 "vtkGhostType" 单元数组做空白化
+                auto draw = DynamicCast<DrawObject>(result);
+                if (draw != nullptr) { draw->SetViewStyle(IG_SURFACE); }
+                modelTreeWidget->addDataObjectToModelTree(result, ItemSource::Algorithm);
+                if (rendererWidget != nullptr) rendererWidget->update();
+            });
+
+    // ---- 点集转八叉树（Point Set To Octree）参数面板 ----
+    PointSetToOctreeDockWidget = igQtPointSetToOctreeWidget::createDockWidget(this);
+    PointSetToOctreeWidget =
+            qobject_cast<igQtPointSetToOctreeWidget*>(PointSetToOctreeDockWidget->widget());
+    addDockWidget(Qt::RightDockWidgetArea, PointSetToOctreeDockWidget);
+    PointSetToOctreeDockWidget->resize(420, 560);
+    PointSetToOctreeDockWidget->hide();
+    connect(PointSetToOctreeWidget, &igQtPointSetToOctreeWidget::closeRequested,
+            PointSetToOctreeDockWidget, &QDockWidget::hide);
+    connect(PointSetToOctreeWidget, &igQtPointSetToOctreeWidget::resultReady, this,
+            [this](DataObject::Pointer result) {
+                if (result == nullptr) return;
+                modelTreeWidget->addDataObjectToModelTree(result, ItemSource::Algorithm);
+                if (rendererWidget != nullptr) rendererWidget->update();
+            });
 
     auto makeWidgetScrollable = [&](QWidget* content, QWidget* parent) -> QWidget* {
         if (!content) return nullptr;
@@ -1943,6 +1981,36 @@ void igQtMainWindow::initAllFilters() {
             res->SetName(data->GetName());
             modelTreeWidget->addDataObjectToModelTree(res, Algorithm);
         }
+    });
+
+    QAction* pointSetToOctree_action = ui->menu_filters->addAction(
+            QStringLiteral("点集转八叉树 (Point Set To Octree)"));
+    connect(pointSetToOctree_action, &QAction::triggered, this, [this](bool) {
+        auto scene = rendererWidget->GetScene();
+        if (scene == nullptr || scene->GetCurrentModel() == nullptr) {
+            showDarkFramelessMessage(QStringLiteral("点集转八叉树"),
+                                     QStringLiteral("请先加载并选择模型。"));
+            return;
+        }
+        PointSetToOctreeWidget->setCurrentModel(scene->GetCurrentModel());
+        PointSetToOctreeDockWidget->show();
+        PointSetToOctreeDockWidget->raise();
+        PointSetToOctreeWidget->setFocus(Qt::OtherFocusReason);
+    });
+
+    QAction* resampleToImage_action = ui->menu_filters->addAction(
+            QStringLiteral("重采样到图像 (Resample To Image)"));
+    connect(resampleToImage_action, &QAction::triggered, this, [this](bool) {
+        auto scene = rendererWidget->GetScene();
+        if (scene == nullptr || scene->GetCurrentModel() == nullptr) {
+            showDarkFramelessMessage(QStringLiteral("重采样到图像"),
+                                     QStringLiteral("请先加载并选择模型。"));
+            return;
+        }
+        ResampleToImageWidget->setCurrentModel(scene->GetCurrentModel());
+        ResampleToImageDockWidget->show();
+        ResampleToImageDockWidget->raise();
+        ResampleToImageWidget->setFocus(Qt::OtherFocusReason);
     });
 }
 

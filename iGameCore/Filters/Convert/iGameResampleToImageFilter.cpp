@@ -14,7 +14,9 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <set>
+#include <string>
 #include <vector>
 
 IGAME_NAMESPACE_BEGIN
@@ -27,6 +29,88 @@ namespace {
 
 constexpr double kInsideEps = 1.0e-7;    // 重心/局部坐标的「在单元内」容差
 constexpr double kDegenerateEps = 1.0e-20; // 退化解的最小行列式
+constexpr double kRelDistTol = 1.0e-6;   // 点到单元表面的距离容差（相对单元尺度）
+
+//------------------------------------------------------------------------------
+// 属性数组的「原类型保留」：按源数组的存储类型新建同类型输出数组。
+// 等价 VTK 在探测输出上按源数组类型复制数组（int 保持 int、double 保持 double）。
+ArrayObject::Pointer NewArrayLike(const ArrayObject::Pointer& src) {
+    switch (src->GetArrayType()) {
+        case IG_FloatArray:
+            return FloatArray::New();
+        case IG_DoubleArray:
+            return DoubleArray::New();
+        case IG_IntArray:
+            return IntArray::New();
+        case IG_UnsignedIntArray:
+            return UnsignedIntArray::New();
+        case IG_CharArray:
+            return CharArray::New();
+        case IG_UnsignedCharArray:
+            return UnsignedCharArray::New();
+        case IG_ShortArray:
+            return ShortArray::New();
+        case IG_UnsignedShortArray:
+            return UnsignedShortArray::New();
+        case IG_LongLongArray:
+            return LongLongArray::New();
+        case IG_UnsignedLongLongArray:
+            return UnsignedLongLongArray::New();
+        default:
+            return FloatArray::New();
+    }
+}
+
+// 是否为「离散」存储类型（整型/字符型）：线性插值对其语义不正确。
+bool IsDiscreteArrayType(IGenum arrayType) {
+    switch (arrayType) {
+        case IG_IntArray:
+        case IG_UnsignedIntArray:
+        case IG_CharArray:
+        case IG_UnsignedCharArray:
+        case IG_ShortArray:
+        case IG_UnsignedShortArray:
+        case IG_LongLongArray:
+        case IG_UnsignedLongLongArray:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// 名称形如 ID 的数组（即使存储为浮点，线性插值同样会插出并不存在的 ID）。
+bool IsIdLikeArrayName(const std::string& name) {
+    static const char* kExactNames[] = {"vtkOriginalPointIds", "vtkOriginalCellIds", "vtkPointIds",
+                                        "vtkCellIds",          "GlobalPointIds",     "GlobalCellIds",
+                                        "ProcessIds",          "vtkProcessId"};
+    for (const char* n : kExactNames) {
+        if (name == n) return true;
+    }
+    // 以 Id / Ids 结尾（大小写敏感，避免把 fluid 之类的普通名字误判为 ID）
+    if (name.size() >= 2 && name.compare(name.size() - 2, 2, "Id") == 0) return true;
+    if (name.size() >= 3 && name.compare(name.size() - 3, 3, "Ids") == 0) return true;
+    return false;
+}
+
+// 本过滤器当前支持的单元类型（与 EvaluateCell 的分支保持一致）。
+bool IsSupportedCellType(IGenum cellType) {
+    switch (static_cast<IGCellType>(cellType)) {
+        case IG_VERTEX:
+        case IG_LINE:
+        case IG_TRIANGLE:
+        case IG_QUAD:
+        case IG_TETRA:
+        case IG_HEXAHEDRON:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// 输出告警（核心库没有 igWarning 宏，直接走 logger 的 warn 级别）。
+void ReportWarning(const std::string& msg) {
+    ::iGame::Log::GetCoreLogger()->warn("{}", msg);
+}
 
 // 与 vtkDataSetAttributes 一致（保持 ghost 数值一一对应）
 constexpr unsigned char kHiddenPoint = 2;  // vtkDataSetAttributes::HIDDENPOINT
@@ -84,6 +168,18 @@ inline bool Solve2(const double A[2][2], const double b[2], double x[2]) {
     return true;
 }
 
+// 单元尺度（最长对角线长度），用作「点到单元距离」相对容差的基准。
+inline double CellScale(const double pts[][3], int npts) {
+    double maxSq = 0.0;
+    for (int i = 0; i < npts; ++i) {
+        for (int j = i + 1; j < npts; ++j) {
+            double d[3] = {pts[i][0] - pts[j][0], pts[i][1] - pts[j][1], pts[i][2] - pts[j][2]};
+            maxSq = std::max(maxSq, Dot(d, d));
+        }
+    }
+    return std::sqrt(maxSq);
+}
+
 // 顶点单元
 bool EvalVertex(const double pts[][3], const double x[3], double w[8]) {
     double d = 0.0;
@@ -92,19 +188,34 @@ bool EvalVertex(const double pts[][3], const double x[3], double w[8]) {
     return d <= 1.0e-12;
 }
 
-// 线段单元（线性插值）
+// 线段单元（线性插值）。
+// 判定必须同时满足：
+//   (1) 参数 t 落在 [0,1]；
+//   (2) 点到直线的**垂直距离**足够小（否则离线段很远的点只要轴向投影落在区间内
+//       也会被误判为「在单元内」，从而产生错误的插值结果）。
 bool EvalLine(const double pts[][3], const double x[3], double w[8]) {
     double dir[3] = {pts[1][0] - pts[0][0], pts[1][1] - pts[0][1], pts[1][2] - pts[0][2]};
     double rel[3] = {x[0] - pts[0][0], x[1] - pts[0][1], x[2] - pts[0][2]};
     const double denom = Dot(dir, dir);
     if (denom < kDegenerateEps) return EvalVertex(pts, x, w);
     const double t = Dot(rel, dir) / denom;
+
+    // 垂直距离：rel 去掉沿 dir 的分量后的剩余长度
+    double perp[3] = {rel[0] - t * dir[0], rel[1] - t * dir[1], rel[2] - t * dir[2]};
+    const double perp2 = Dot(perp, perp);
+    const double distTol = kRelDistTol * std::sqrt(denom);
+    if (perp2 > distTol * distTol) return false;
+
     w[0] = 1.0 - t;
     w[1] = t;
     return t >= -kInsideEps && t <= 1.0 + kInsideEps;
 }
 
-// 三角形单元（平面重心坐标）
+// 三角形单元（平面重心坐标）。
+// 判定必须同时满足：
+//   (1) 点到三角形**所在平面**的距离足够小——重心坐标只是点在该平面内投影的坐标，
+//       离平面很远的点其投影仍可能落在三角形内部，只判断重心坐标会误判为「在单元内」；
+//   (2) 三个重心坐标均非负（允许 kInsideEps 级别的微小外溢）。
 bool EvalTriangle(const double pts[][3], const double x[3], double w[8]) {
     double v0[3] = {pts[1][0] - pts[0][0], pts[1][1] - pts[0][1], pts[1][2] - pts[0][2]};
     double v1[3] = {pts[2][0] - pts[0][0], pts[2][1] - pts[0][1], pts[2][2] - pts[0][2]};
@@ -116,6 +227,15 @@ bool EvalTriangle(const double pts[][3], const double x[3], double w[8]) {
     const double v = (d11 * d20 - d01 * d21) / denom;
     const double u = (d00 * d21 - d01 * d20) / denom;
     const double t = 1.0 - v - u;
+
+    // 点到平面距离：|(x - p0)·n| / |n|，其中 n = v0 × v1
+    double n[3];
+    Cross(v0, v1, n);
+    const double nlen = std::sqrt(Dot(n, n));
+    if (nlen < kDegenerateEps) return false; // 三点共线，退化三角形
+    const double dist = std::fabs(Dot(v2, n)) / nlen;
+    if (dist > kRelDistTol * CellScale(pts, 3)) return false;
+
     w[0] = t;
     w[1] = v;
     w[2] = u;
@@ -141,11 +261,20 @@ bool EvalTetra(const double pts[][3], const double x[3], double w[8]) {
     return w0 >= -kInsideEps && w1 >= -kInsideEps && w2 >= -kInsideEps && w3 >= -kInsideEps;
 }
 
-// 四边形单元（双线性，Newton 迭代求局部坐标 r,s）
+// 四边形单元（双线性，**三维** Gauss-Newton 迭代求局部坐标 r,s）。
+// 原实现只取雅可比的 x/y 两个分量（等价于把四边形投影到 XY 平面再求解），
+// 对不平行于 XY 平面、或发生翘曲（warped / 非平面）的四边形会给出错误结果。
+// 这里改为在三维中最小化 ||x - P(r,s)||²，用正规方程 (JᵀJ)δ = Jᵀ(x-P) 迭代，
+// 对任意朝向的四边形都成立；同时用收敛后的残差判断点是否真的落在四边形表面上。
 bool EvalQuad(const double pts[][3], const double x[3], double w[8]) {
     const double R[4] = {-1.0, 1.0, 1.0, -1.0};
     const double S[4] = {-1.0, -1.0, 1.0, 1.0};
+    const double scale = CellScale(pts, 4);
+    if (scale <= 0.0) return false; // 四点重合，退化
+    const double distTol = kRelDistTol * scale;
+
     double r = 0.0, s = 0.0;
+    double residual2 = std::numeric_limits<double>::max();
     for (int iter = 0; iter < 100; ++iter) {
         double P[3] = {0.0, 0.0, 0.0};
         double dPdr[3] = {0.0, 0.0, 0.0};
@@ -160,15 +289,23 @@ bool EvalQuad(const double pts[][3], const double x[3], double w[8]) {
                 dPds[c] += dNds * pts[i][c];
             }
         }
-        double f[2] = {x[0] - P[0], x[1] - P[1]};
-        double J[2][2] = {{dPdr[0], dPds[0]}, {dPdr[1], dPds[1]}};
+        const double f[3] = {x[0] - P[0], x[1] - P[1], x[2] - P[2]};
+        residual2 = Dot(f, f);
+        if (residual2 <= distTol * distTol) break; // 已落在四边形表面上
+
+        double JtJ[2][2] = {{Dot(dPdr, dPdr), Dot(dPdr, dPds)},
+                            {Dot(dPdr, dPds), Dot(dPds, dPds)}};
+        double Jtf[2] = {Dot(dPdr, f), Dot(dPds, f)};
         double delta[2];
-        if (!Solve2(J, f, delta)) return false;
+        if (!Solve2(JtJ, Jtf, delta)) return false; // 雅可比奇异，退化四边形
         r += delta[0];
         s += delta[1];
-        if (std::sqrt(f[0] * f[0] + f[1] * f[1]) < 1.0e-12) break;
+        if (std::fabs(delta[0]) < 1.0e-14 && std::fabs(delta[1]) < 1.0e-14) break;
     }
-    if (std::fabs(r) > 1.0 + 1.0e-6 || std::fabs(s) > 1.0 + 1.0e-6) return false;
+
+    // 迭代收敛后点仍不在四边形表面上 → 不在单元内
+    if (residual2 > distTol * distTol) return false;
+    if (std::fabs(r) > 1.0 + kInsideEps || std::fabs(s) > 1.0 + kInsideEps) return false;
     for (int i = 0; i < 4; ++i) w[i] = 0.25 * (1.0 + r * R[i]) * (1.0 + s * S[i]);
     return true;
 }
@@ -279,6 +416,43 @@ void ResampleToImageFilter::GetSamplingBounds(double bounds[6]) const {
 }
 
 //------------------------------------------------------------------------------
+const char* ResampleToImageFilter::GetSupportedCellTypesText() {
+    return "Vertex / Line / Triangle / Quad / Tetra / Hexahedron";
+}
+
+//------------------------------------------------------------------------------
+bool ResampleToImageFilter::IsCellTypeSupported(IGenum cellType) {
+    return IsSupportedCellType(cellType);
+}
+
+//------------------------------------------------------------------------------
+bool ResampleToImageFilter::EstimateOutputSize(IGsize& gridPoints, IGsize& gridCells,
+                                               double& memoryMB) {
+    gridPoints = 0;
+    gridCells = 0;
+    memoryMB = 0.0;
+
+    DataObject::Pointer input = GetInput(0);
+    if (input == nullptr) return false;
+
+    int dims[3];
+    GetSamplingDimensions(dims);
+    if (dims[0] <= 0 || dims[1] <= 0 || dims[2] <= 0) return false;
+
+    gridPoints = static_cast<IGsize>(dims[0]) * static_cast<IGsize>(dims[1]) *
+                 static_cast<IGsize>(dims[2]);
+    gridCells = static_cast<IGsize>(std::max(1, dims[0] - 1)) *
+                static_cast<IGsize>(std::max(1, dims[1] - 1)) *
+                static_cast<IGsize>(std::max(1, dims[2] - 1));
+
+    // 粗略内存量级：点 ghost + 掩膜 + 约 4 条 float 数组（按分量数粗估）+ 单元 ghost
+    const double bytes = static_cast<double>(gridPoints) * (1.0 + 1.0 + 4.0 * 4.0) +
+                         static_cast<double>(gridCells) * 1.0;
+    memoryMB = bytes / (1024.0 * 1024.0);
+    return true;
+}
+
+//------------------------------------------------------------------------------
 bool ResampleToImageFilter::Execute() {
     DataObject::Pointer input = GetInput(0);
     if (input == nullptr) return false;
@@ -298,6 +472,40 @@ bool ResampleToImageFilter::Execute() {
     if (numberOfPoints == 0 || numberOfCells == 0) {
         igError("ResampleToImageFilter: empty input.");
         return false;
+    }
+
+    // ---- 单元类型预扫描 ----
+    // 明确支持的单元类型；遇到不支持的必须提示，不能静默产出不完整的结果。
+    m_Message.clear();
+    std::map<IGenum, IGsize> cellTypeCounts;
+    for (IGsize cid = 0; cid < numberOfCells; ++cid) {
+        ++cellTypeCounts[mesh->GetCellType(cid)];
+    }
+    IGsize unsupportedCellCount = 0;
+    std::string unsupportedDetail;
+    for (const auto& kv : cellTypeCounts) {
+        if (IsSupportedCellType(kv.first)) continue;
+        const char* typeName = GetCellTypeAsString(kv.first);
+        const std::string name = (typeName != nullptr && *typeName != '\0')
+                                         ? std::string(typeName)
+                                         : ("类型#" + std::to_string(static_cast<long long>(kv.first)));
+        unsupportedCellCount += kv.second;
+        if (!unsupportedDetail.empty()) unsupportedDetail += "、";
+        unsupportedDetail += name + "×" + std::to_string(static_cast<long long>(kv.second));
+    }
+    if (unsupportedCellCount > 0) {
+        const std::string head =
+                "输入包含 " + std::to_string(static_cast<long long>(unsupportedCellCount)) +
+                " 个不受支持的单元（" + unsupportedDetail + "）；本过滤器仅支持 " +
+                GetSupportedCellTypesText() + "。";
+        if (m_FailOnUnsupportedCells) {
+            m_Message = head + " 为不产出可能不完整的结果，已终止执行"
+                               "（如需强行继续可调用 SetFailOnUnsupportedCells(false)）。";
+            igError("{}", m_Message);
+            return false;
+        }
+        m_Message = head + " 这些单元覆盖的格点将保持无效（vtkValidPointMask = 0）。";
+        ReportWarning("ResampleToImageFilter: " + m_Message);
     }
 
     // 采样区域（等价 VTK vtkResampleToImage::RequestData）
@@ -372,10 +580,12 @@ bool ResampleToImageFilter::Execute() {
         ArrayObject::Pointer arr;
         IGenum type;
         int dim;
+        bool nearestVertex; // true = 不做线性插值，改用最近顶点取值（离散/ID 类数组）
     };
     std::vector<SrcArray> srcPointArrays;
     std::vector<SrcArray> srcCellArrays;
     std::set<std::string> pointArrayNames;
+    std::string discreteDetail;
     {
         auto all = mesh->GetAttributeSet()->GetAllAttributes();
         for (IGsize i = 0; i < all->GetNumberOfElements(); ++i) {
@@ -383,19 +593,34 @@ bool ResampleToImageFilter::Execute() {
             if (a.isDeleted || a.pointer == nullptr) continue;
             if (a.attachmentType == IG_POINT) {
                 if (a.pointer->GetNumberOfElements() != numberOfPoints) continue;
-                srcPointArrays.push_back({a.pointer, a.type, a.pointer->GetDimension()});
+                // 整型/字符型（离散）或名称形如 ID 的点数组不做线性插值：
+                // 对 ID 做线性插值会得到并不存在的 ID，语义错误。
+                const bool discrete = m_DisableInterpolationForDiscrete &&
+                                      (IsDiscreteArrayType(a.pointer->GetArrayType()) ||
+                                       IsIdLikeArrayName(a.pointer->GetName()));
+                if (discrete) {
+                    if (!discreteDetail.empty()) discreteDetail += "、";
+                    discreteDetail += a.pointer->GetName();
+                }
+                srcPointArrays.push_back({a.pointer, a.type, a.pointer->GetDimension(), discrete});
                 pointArrayNames.insert(a.pointer->GetName());
             } else if (a.attachmentType == IG_CELL) {
                 if (a.pointer->GetNumberOfElements() != numberOfCells) continue;
-                srcCellArrays.push_back({a.pointer, a.type, a.pointer->GetDimension()});
+                srcCellArrays.push_back({a.pointer, a.type, a.pointer->GetDimension(), false});
             }
         }
     }
     // 源单元数据 → 输出点数据（快照），跳过与点数组同名的。
+    // 同名点/单元数组冲突时（等价 vtkProbeFilter）**点数据优先**；此处显式记录冲突，
+    // 避免用户误以为单元数据也参与了输出。
     std::vector<size_t> snappedCellIndices;
+    std::string conflictDetail;
     for (size_t c = 0; c < srcCellArrays.size(); ++c) {
         if (pointArrayNames.count(srcCellArrays[c].arr->GetName()) == 0) {
             snappedCellIndices.push_back(c);
+        } else {
+            if (!conflictDetail.empty()) conflictDetail += "、";
+            conflictDetail += srcCellArrays[c].arr->GetName();
         }
     }
 
@@ -406,17 +631,18 @@ bool ResampleToImageFilter::Execute() {
     mask->Resize(numberOfGridPoints);
 
     // 每一条输入点属性对应一条输出插值数组（默认值 0）。
-    std::vector<FloatArray::Pointer> outPointArrays(srcPointArrays.size());
+    // 输出数组**保持源数组的存储类型与分量数**（等价 VTK 在探测输出上按源数组类型复制）。
+    std::vector<ArrayObject::Pointer> outPointArrays(srcPointArrays.size());
     for (size_t s = 0; s < srcPointArrays.size(); ++s) {
-        outPointArrays[s] = FloatArray::New();
+        outPointArrays[s] = NewArrayLike(srcPointArrays[s].arr);
         outPointArrays[s]->SetName(srcPointArrays[s].arr->GetName());
         outPointArrays[s]->SetDimension(srcPointArrays[s].dim);
         outPointArrays[s]->Resize(numberOfGridPoints);
     }
-    // 每一条被快照的源单元属性 → 一条输出点数组（默认值 0）。
-    std::vector<FloatArray::Pointer> outCellArrays(snappedCellIndices.size());
+    // 每一条被快照的源单元属性 → 一条输出点数组（默认值 0），同样保持源数组类型。
+    std::vector<ArrayObject::Pointer> outCellArrays(snappedCellIndices.size());
     for (size_t s = 0; s < snappedCellIndices.size(); ++s) {
-        outCellArrays[s] = FloatArray::New();
+        outCellArrays[s] = NewArrayLike(srcCellArrays[snappedCellIndices[s]].arr);
         outCellArrays[s]->SetName(srcCellArrays[snappedCellIndices[s]].arr->GetName());
         outCellArrays[s]->SetDimension(srcCellArrays[snappedCellIndices[s]].dim);
         outCellArrays[s]->Resize(numberOfGridPoints);
@@ -525,14 +751,25 @@ bool ResampleToImageFilter::Execute() {
                     if (!EvaluateCell(cellType, pts, n, x, weights)) continue;
 
                     mask->ValueAt(ptId) = 1;
-                    // 插值源点属性
+                    // 插值源点属性。离散/ID 类数组不做线性插值，改用包含该格点的源单元中
+                    // 权重最大的顶点取值（最近顶点采样）。
                     for (size_t s = 0; s < srcPointArrays.size(); ++s) {
                         const int dim = srcPointArrays[s].dim;
-                        for (int d = 0; d < dim; ++d) vals[d] = 0.0;
-                        for (int v = 0; v < n; ++v) {
-                            const double wv = weights[v];
+                        if (srcPointArrays[s].nearestVertex) {
+                            int best = 0;
+                            for (int v = 1; v < n; ++v) {
+                                if (weights[v] > weights[best]) best = v;
+                            }
                             for (int d = 0; d < dim; ++d) {
-                                vals[d] += wv * srcPointArrays[s].arr->GetElementValue(ids[v], d);
+                                vals[d] = srcPointArrays[s].arr->GetElementValue(ids[best], d);
+                            }
+                        } else {
+                            for (int d = 0; d < dim; ++d) vals[d] = 0.0;
+                            for (int v = 0; v < n; ++v) {
+                                const double wv = weights[v];
+                                for (int d = 0; d < dim; ++d) {
+                                    vals[d] += wv * srcPointArrays[s].arr->GetElementValue(ids[v], d);
+                                }
                             }
                         }
                         outPointArrays[s]->SetElement(ptId, vals.data());
@@ -605,6 +842,29 @@ bool ResampleToImageFilter::Execute() {
     outAttrs->AddAttribute(IG_SCALAR, IG_POINT, mask);
     outAttrs->AddAttribute(IG_SCALAR, IG_POINT, pointGhost);
     outAttrs->AddAttribute(IG_SCALAR, IG_CELL, cellGhost);
+
+    // ---- 诊断信息汇总（供界面提示，避免静默的不完整/可疑结果）----
+    {
+        IGsize validCount = 0;
+        for (IGsize p = 0; p < numberOfGridPoints; ++p) {
+            if (mask->ValueAt(p) != 0) ++validCount;
+        }
+        std::string info;
+        info += "采样维度 " + std::to_string(dims[0]) + "×" + std::to_string(dims[1]) + "×" +
+                std::to_string(dims[2]) + "（" +
+                std::to_string(static_cast<long long>(numberOfGridPoints)) + " 格点 / " +
+                std::to_string(static_cast<long long>(numberOfOutCells)) + " 单元）；";
+        info += "有效格点 " + std::to_string(static_cast<long long>(validCount)) + "/" +
+                std::to_string(static_cast<long long>(numberOfGridPoints)) + "。";
+        if (!conflictDetail.empty()) {
+            info += " 同名数组冲突：点数据优先，以下单元数组已被忽略（" + conflictDetail + "）。";
+        }
+        if (!discreteDetail.empty()) {
+            info += " 以下离散/ID 类数组未做线性插值（改用最近顶点取值）：" + discreteDetail + "。";
+        }
+        if (!m_Message.empty()) m_Message += " ";
+        m_Message += info;
+    }
 
     SetOutput(output);
     return true;

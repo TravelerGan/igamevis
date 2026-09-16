@@ -60,6 +60,42 @@ public:
     /// 有效点掩膜数组名。固定为 "vtkValidPointMask"，等价 VTK 的 GetMaskArrayName()。
     static const char* GetMaskArrayName() { return "vtkValidPointMask"; }
 
+    /// 本过滤器支持的单元类型清单（用于界面提示，避免用户误以为所有单元都被采样）。
+    static const char* GetSupportedCellTypesText();
+
+    /// 判断某个单元类型是否受支持（供界面提示）。
+    static bool IsCellTypeSupported(IGenum cellType);
+
+    //@{
+    /// 是否对「整型/字符型（离散，含各类 ID）」的点数组禁用线性插值。默认 true。
+    /// 这类数组不做线性插值，改用包含该格点的源单元中权重最大的顶点取值（最近顶点
+    /// 采样）——对 ID 做线性插值会插出并不存在的 ID，语义错误。
+    /// 浮点数组（float/double）始终按 VTK 语义做线性插值。
+    void SetDisableInterpolationForDiscreteArrays(bool b) { m_DisableInterpolationForDiscrete = b; }
+    bool GetDisableInterpolationForDiscreteArrays() const { return m_DisableInterpolationForDiscrete; }
+    //@}
+
+    //@{
+    /// 遇到「不支持的单元类型」时是否直接判定失败。默认 true：不产出可能不完整的
+    /// 结果，并在 GetMessage() 中给出原因；置为 false 时继续执行，但在 GetMessage()
+    /// 中明确列出不支持的单元类型、数量及其影响，避免静默产出不完整结果。
+    void SetFailOnUnsupportedCells(bool b) { m_FailOnUnsupportedCells = b; }
+    bool GetFailOnUnsupportedCells() const { return m_FailOnUnsupportedCells; }
+    //@}
+
+    //@{
+    /// 诊断信息（执行后填充）：支持/不支持的单元类型统计、同名点/单元数组冲突、
+    /// 离散数组的非插值处理清单等。供界面提示使用，避免静默的不完整/可疑结果。
+    const std::string& GetMessage() const { return m_Message; }
+    //@}
+
+    //@{
+    /// 执行前预估输出规模（不真正执行），供界面在大尺寸时提示用户。
+    /// gridPoints / gridCells 为输出的格点数与单元数，memoryMB 为点数据内存量级（MB）。
+    /// 返回 false 表示输入无效或采样维度非法。
+    bool EstimateOutputSize(IGsize& gridPoints, IGsize& gridCells, double& memoryMB);
+    //@}
+
 protected:
     ResampleToImageFilter();
     ~ResampleToImageFilter() override = default;
@@ -67,6 +103,9 @@ protected:
     int SamplingDimensions[3] = {10, 10, 10};
     double SamplingBounds[6] = {0.0, 1.0, 0.0, 1.0, 0.0, 1.0};
     bool UseInputBounds = true;
+    bool m_DisableInterpolationForDiscrete{true};
+    bool m_FailOnUnsupportedCells{true};
+    std::string m_Message;
 };
 
 IGAME_NAMESPACE_END

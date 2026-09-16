@@ -16,9 +16,12 @@ bit6 = (x<=cx, y>cy, z>cz)     bit7 = (x>cx, y>cy, z>cz)
 ```
 
 其中 `(cx, cy, cz)` 为该体素中心的坐标；多个点落入同一体素时按位 OR 累加。
+体素归属按 VTK 的公式确定：`ijk[i] = floor((p - origin) / spacing)` 并钳制到
+`[0, 分割数-1]`，`outCellId = ijk[0] + ijk[1]*extent[1] + ijk[2]*extent[1]*extent[3]`。
 
 若开启 `ProcessInputPointArray`，则同时处理一个输入点属性数组，并把结果作为一个多分量（每分量一个
 统计函数，顺序为 LastValue / Min / Max / Count / Sum / Mean）的单元属性数组附加到输出，与 VTK 一致。
+默认勾选 `Min / Max / Count / Mean` 时输出 5 个分量（`Min, Max, Count, Sum, Mean`）。
 
 > 说明：iGameVis 没有独立的 `vtkImageData` / `vtkPartitionedDataSet` 概念，因此 VTK 的「分片数据集 +
 > 单张图像」在此直接映射为一个 `StructuredMesh`；图像的 origin / spacing 通过网格点坐标原样表达。
@@ -36,6 +39,23 @@ bit6 = (x<=cx, y>cy, z>cz)     bit7 = (x>cx, y>cy, z>cz)
 | `ComputeSum` | `bool` | `false` | 统计：求和 |
 | `ComputeMean` | `bool` | `true` | 统计：均值（开启时自动计算 Count 与 Sum） |
 
+### Qt 参数面板
+
+菜单 **算法处理 → 点集转八叉树 (Point Set To Octree)** 打开停靠面板，包含：
+
+- **每体素平均点数**：对应 `NumberOfPointsPerCell`（最小 1）；
+- **处理点属性数组**：对应 `ProcessInputPointArray`；未勾选时，属性下拉框与 6 个统计函数复选框
+  整体置灰；
+- **点属性（仅单分量）**：下拉框只列出当前模型上**单分量**的 `IG_POINT` 数组，对应
+  `InputPointArrayName`；若模型上没有可用数组会给出提示；
+- **统计函数复选框**：`Last (末值)`、`Min`、`Max`、`Count`、`Sum`、`Mean`，默认勾选 Min/Max/Count/Mean；
+  面板会提示「Mean 开启时会自动一并计算 Count 与 Sum」以及「至少需开启一个统计函数」；
+- **执行前预估与诊断**：显示输入点数/单元数、预估体素数（= 点数 / 每体素平均点数）与输出分量数；
+  预估体素数过大（> 5000 万）时执行前弹窗确认；执行后显示本次运行的诊断信息。
+
+面板本身不直接写模型树：它发出 `resultReady(DataObject::Pointer)` 信号，由主窗口按
+「算法结果」加入模型树并刷新渲染。
+
 ## 调用方式
 
 ```cpp
@@ -46,9 +66,13 @@ filter->SetInput(input);                          // 输入：PointSet 子类
 filter->SetNumberOfPointsPerCell(1);              // 可选，体素含点阈值
 // filter->SetProcessInputPointArray(true);       // 可选，统计点属性
 // filter->SetInputPointArrayName("field");       // 可选，指定要统计的数组
+// filter->SetComputeLastValue(false);            // 可选，按需勾选统计函数
+// filter->SetComputeMean(true);
 filter->Execute();
 
 auto out = filter->GetOutput();                   // StructuredMesh，带单元标量 "octree"
+// 诊断信息：输出图像维度、体素数、参与统计的点属性与分量数
+const std::string& info = filter->GetMessage();
 // 以点/表面方式显示：SetViewStyle(IG_POINTS) 或 IG_SURFACE
 ```
 
@@ -67,5 +91,10 @@ auto out = filter->GetOutput();                   // StructuredMesh，带单元�
    连续的「占用计数」。
 3. **统计函数**：`ProcessInputPointArray=true` 时至少需开启一个统计函数，否则 `Execute` 报错；开启
    `ComputeMean` 会自动连带计算 Count 与 Sum。
-4. **输出维度**：`dimensions[i] = 各轴分割数 + 1`，与 VTK 一致；原点/spacing 由网格点坐标隐式表达。
-5. **输入点数组类型**：统计时按输入数组分量逐分量进行，输出为对应分量数的单元属性数组。
+4. **输入点数组必须为单分量**：`ProcessInputPointArray=true` 时，指定的点属性数组维数必须为 1，
+   否则 `Execute` 报错（与 VTK 的 `SCALARS` 输入约定一致）；Qt 面板的下拉框已按此过滤。
+5. **输出维度**：`dimensions[i] = 各轴分割数 + 1`，与 VTK 一致；原点/spacing 由网格点坐标隐式表达。
+6. **输入点数组类型**：统计时按输入数组分量逐分量进行，输出为对应分量数的单元属性数组。
+7. **数值一致性**：体素归属与 `Min / Max / Count / Sum / Mean` 已用「独立复算」验证——对同一输入点集，
+   按 VTK 公式重新计算每个点的体素编号并自行统计，与过滤器输出的每个体素逐项一致（含 Count 之和 =
+   输入点数）。

@@ -5,6 +5,8 @@
 
 #include "iGameSceneManager.h"
 
+#include <iGameUnstructuredMesh.h>
+
 ModelTreeWidgetItem::ModelTreeWidgetItem(QTreeWidget* parent) : QTreeWidgetItem(parent), visibility(true) {
     QWidget* buttonWidget = new QWidget(parent);
     QHBoxLayout* layout = new QHBoxLayout(buttonWidget);
@@ -61,6 +63,23 @@ void ModelTreeWidgetItem::setModel(iGame::Model* model) {
     //    showWireframe();
     showFill();
     showPickedItem();
+
+    // 只有点、没有单元的非结构化网格（点云）抽壳渲染必然失败：ModelGeometryFilter 对它
+    // 抽出 0 个面却返回成功，ConvertToDrawableData 于是把空的表面网格当成可绘制对象并
+    // 提前 return，顶点一个都进不了渲染管线；而默认样式（面填充）又不含点绘制，模型打开
+    // 后会完全不可见（只剩包围盒）。这里兜底：这类数据自动关闭抽壳并打开点显示，
+    // 保证点云文件打开即可见。
+    if (model != nullptr) {
+        auto dataObject = model->GetDataObject();
+        auto mesh = iGame::DynamicCast<iGame::UnstructuredMesh>(dataObject);
+        if (mesh != nullptr && mesh->GetNumberOfCells() == 0) {
+            if (auto drawObject = iGame::DynamicCast<iGame::DrawObject>(dataObject)) {
+                drawObject->SetShellRenderingOption(false);
+            }
+            view_points->setChecked(true);
+            showPoints();
+        }
+    }
 }
 
 void ModelTreeWidgetItem::setName(const QString& name) {

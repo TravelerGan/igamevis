@@ -169,19 +169,42 @@ void igQtModelInformationWidget::updateInformationFrame() {
                     auto& attr = attrs->GetElement(i);
                     auto arr = attr.pointer;
                     if (arr == nullptr || attr.IsNone()) continue;
+                    // 数组类型名（与 ParaView 的属性表一致）：按 GetArrayType() 枚举完整映射，
+                    // 避免某些类型落进 unknown（例如八叉树过滤器输出的 UnsignedCharArray）
                     QString typeName = QStringLiteral("unknown");
-                    if (iGame::DynamicCast<iGame::LongLongArray>(arr)) {
-                        typeName = QStringLiteral("long long");
-                    } else if (iGame::DynamicCast<iGame::IntArray>(arr)) {
-                        typeName = QStringLiteral("int");
-                    } else if (iGame::DynamicCast<iGame::UnsignedIntArray>(arr)) {
-                        typeName = QStringLiteral("unsigned int");
-                    } else if (iGame::DynamicCast<iGame::FloatArray>(arr)) {
-                        typeName = QStringLiteral("float");
-                    } else if (iGame::DynamicCast<iGame::DoubleArray>(arr)) {
-                        typeName = QStringLiteral("double");
-                    } else if (iGame::DynamicCast<iGame::CharArray>(arr)) {
-                        typeName = QStringLiteral("char");
+                    switch (arr->GetArrayType()) {
+                        case IG_FloatArray:
+                            typeName = QStringLiteral("float");
+                            break;
+                        case IG_DoubleArray:
+                            typeName = QStringLiteral("double");
+                            break;
+                        case IG_IntArray:
+                            typeName = QStringLiteral("int");
+                            break;
+                        case IG_UnsignedIntArray:
+                            typeName = QStringLiteral("unsigned int");
+                            break;
+                        case IG_ShortArray:
+                            typeName = QStringLiteral("short");
+                            break;
+                        case IG_UnsignedShortArray:
+                            typeName = QStringLiteral("unsigned short");
+                            break;
+                        case IG_CharArray:
+                            typeName = QStringLiteral("char");
+                            break;
+                        case IG_UnsignedCharArray:
+                            typeName = QStringLiteral("unsigned char");
+                            break;
+                        case IG_LongLongArray:
+                            typeName = QStringLiteral("long long");
+                            break;
+                        case IG_UnsignedLongLongArray:
+                            typeName = QStringLiteral("unsigned long long");
+                            break;
+                        default:
+                            break;
                     }
                     QString rangeText = QStringLiteral("n/a");
                     if (arr->GetNumberOfElements() > 0) {

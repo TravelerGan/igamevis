@@ -155,3 +155,56 @@ iGame::ResampleToImageFilter::IsCellTypeSupported(type);   // 单个单元类型
    请用 `ModelGeometryFilter` 读取输出上的 `vtkGhostType` 数组（测试用例中已演示）。
 7. **容差**：平面/轴线距离容差取「单元尺度（单元点集最大两两距离）× 1e-6」，参数域边界容差 1e-7。
    极端细长或退化单元可能因容差而被判为无效，属预期行为。
+
+## 与 ParaView / VTK 的结果对照
+
+在**相同采样维度**下，本过滤器与 VTK `vtkResampleToImage`（即 ParaView 的 Resample To Image）数值一致；
+若对照时发现"对不上"，通常是下面三类原因，而不是算法差异。
+
+### 1. 采样维度不同（最常见）
+
+`SamplingDimensions` 默认 `{10, 10, 10}`（与 VTK 类默认值相同），而 ParaView 面板里常被填成
+`100 × 100 × 100`。格点越密，线性插值越接近真实极值。以 `Examples/Models/ResampleCube.vtk`
+（点字段 `field = x²+y²+z²`，挖掉 (1,1,1) 角上 1/8 立方体）为例，`field` 最大值随维度变化：
+
+| SamplingDimensions | field 最大值 |
+| --- | --- |
+| 10³（本过滤器默认） | 2.22222 |
+| 11³ | 2.25 |
+| 20³ | 2.23684 |
+| 50³ | 2.2449 |
+| 100³ | 2.24747（= ParaView 的 2.247473） |
+
+### 2. 面板统计口径不同（模型信息面板已对齐 ParaView）
+
+ParaView 的信息面板在统计数组范围时**跳过被 blank（幽灵标记）的元组**，本项目原先不跳过，于是一份数据
+显示成两种结果：被挖掉角上的格点没有单元覆盖，值为 `0`、`vtkValidPointMask = 0`、
+`vtkGhostType = 2`（点）/`32`（单元），把它们计入范围就得到 `[0, ...]`、`[0, 1]`、`[0, 2]`、`[0, 32]`。
+现在模型信息面板同样按 `vtkDataSetAttributes::HIDDENPOINT`(2) / `HIDDENCELL`(32) 位跳过幽灵元组，
+100³ 实测显示为：
+
+```text
+field             | float         | [7.5e-07, 2.24747]
+vtkValidPointMask | char          | [1, 1]
+vtkGhostType      | unsigned char | [0, 0]        (点)
+vtkGhostType      | unsigned char | [0, 0]        (单元)
+```
+
+与 ParaView 的 `field float [7.50000026528141461e-07, 2.2474732398986816]`、`vtkValidPointMask [1, 1]`、
+`vtkGhostType [0, 0]` 完全一致。注意**底层数据没有变化**：无效格点仍然是 `0` / mask `0` / ghost `2`、`32`，
+用其它不跳过幽灵元组的工具查看时仍会看到这些值。
+
+### 3. `vtkGhostType` 的数值语义
+
+`2` 与 `32` 是 VTK 的 `HIDDENPOINT` / `HIDDENCELL`，由 `vtkResampleToImage::SetBlankPointsAndCells`
+打在 `vtkValidPointMask == 0` 的点/单元上，不是本项目自定义的编码。若某个 VTK/ParaView 版本没有这两个
+数组或值恒为 0，说明该版本的 `vtkResampleToImage` 未做空白化，属于版本差异，不是数值差异。
+
+### 已知尚未对齐的差异
+
+1. **单元内判定容差**：本过滤器用参数域容差（`1e-7`）判定点是否落在单元内；VTK `vtkProbeFilter` 在
+   `ComputeTolerance` 关闭时用 `Tolerance = 1.0`，开启时用 `单元长度² × 1e-6`。常规模型结果一致，
+   极端细长、退化或极薄单元在边界格点上可能有极少数判定不同。
+2. **空点吸附**：VTK 的 `SnapToCellWithClosestPoint` / `ProbeEmptyPoints` 会把没有单元覆盖的格点吸附到
+   最近的单元并置为有效；本过滤器未实现该步骤，这类格点保持 `vtkValidPointMask = 0`。对照时应先确认
+   ParaView 端该项的开关状态，关闭吸附后两边的有效点集合一致。

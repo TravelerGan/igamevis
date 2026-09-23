@@ -163,8 +163,20 @@ void igQtModelInformationWidget::updateInformationFrame() {
         // 属性数组：名称 / 类型 / 范围（与 ParaView 的属性表格式一致）
         auto attrSet = obj->GetAttributeSet();
         if (attrSet != nullptr && attrSet->GetNumberOfAttributes() > 0) {
-            auto AppendAttributeRows = [&](auto attrs) {
+            // ParaView 的信息面板在统计数组范围时会跳过被 blank（幽灵）的元组，这里采用同一口径：
+            // 按 vtkGhostType 中的 HIDDENPOINT / HIDDENCELL 位跳过被隐藏的点或单元。
+            auto AppendAttributeRows = [&](auto attrs, unsigned char hiddenBit) {
                 if (attrs == nullptr || attrs->GetNumberOfElements() == 0) return;
+                iGame::ArrayObject::Pointer ghostArray = nullptr;
+                for (int g = 0; g < attrs->GetNumberOfElements(); g++) {
+                    auto& ghostAttr = attrs->GetElement(g);
+                    if (ghostAttr.IsNone() || ghostAttr.pointer == nullptr) continue;
+                    const std::string ghostName = ghostAttr.pointer->GetName();
+                    if (ghostName == "vtkGhostType" || ghostName == "GhostType") {
+                        ghostArray = ghostAttr.pointer;
+                        break;
+                    }
+                }
                 for (int i = 0; i < attrs->GetNumberOfElements(); i++) {
                     auto& attr = attrs->GetElement(i);
                     auto arr = attr.pointer;
@@ -208,21 +220,44 @@ void igQtModelInformationWidget::updateInformationFrame() {
                     }
                     QString rangeText = QStringLiteral("n/a");
                     if (arr->GetNumberOfElements() > 0) {
-                        double rmin = arr->GetValue(0);
-                        double rmax = arr->GetValue(0);
-                        for (IGsize k = 1; k < arr->GetNumberOfValues(); ++k) {
-                            double v = arr->GetValue(k);
-                            if (v < rmin) rmin = v;
-                            if (v > rmax) rmax = v;
+                        const int dim = arr->GetDimension() > 0 ? arr->GetDimension() : 1;
+                        double rmin = 0.0;
+                        double rmax = 0.0;
+                        bool hasValue = false;
+                        // 第一遍跳过被 blank 的元组；若全被 blank，第二遍回退为统计全部，避免显示 n/a
+                        for (int pass = 0; pass < 2 && !hasValue; ++pass) {
+                            const bool skipHidden = (pass == 0);
+                            for (IGsize t = 0; t < arr->GetNumberOfElements(); ++t) {
+                                if (skipHidden && ghostArray != nullptr &&
+                                    t < ghostArray->GetNumberOfElements() &&
+                                    (static_cast<unsigned char>(ghostArray->GetElementValue(t, 0)) & hiddenBit) !=
+                                            0) {
+                                    continue;
+                                }
+                                for (int c = 0; c < dim; ++c) {
+                                    const double v = arr->GetElementValue(t, c);
+                                    if (!hasValue) {
+                                        rmin = rmax = v;
+                                        hasValue = true;
+                                    } else if (v < rmin) {
+                                        rmin = v;
+                                    } else if (v > rmax) {
+                                        rmax = v;
+                                    }
+                                }
+                            }
                         }
-                        rangeText = QStringLiteral("[%1, %2]").arg(rmin).arg(rmax);
+                        if (hasValue) {
+                            rangeText = QStringLiteral("[%1, %2]").arg(rmin).arg(rmax);
+                        }
                     }
                     createPropertyLabel(statForm, QString::fromStdString(arr->GetName()),
                                         typeName + QStringLiteral(" | ") + rangeText);
                 }
             };
-            AppendAttributeRows(attrSet->GetAllPointAttributes());
-            AppendAttributeRows(attrSet->GetAllCellAttributes());
+            // 2 = vtkDataSetAttributes::HIDDENPOINT，32 = vtkDataSetAttributes::HIDDENCELL
+            AppendAttributeRows(attrSet->GetAllPointAttributes(), 2);
+            AppendAttributeRows(attrSet->GetAllCellAttributes(), 32);
         }
     }
 

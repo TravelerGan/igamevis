@@ -193,12 +193,18 @@ bool EvalVertex(const double pts[][3], const double x[3], double w[8]) {
 //   (1) 参数 t 落在 [0,1]；
 //   (2) 点到直线的**垂直距离**足够小（否则离线段很远的点只要轴向投影落在区间内
 //       也会被误判为「在单元内」，从而产生错误的插值结果）。
-bool EvalLine(const double pts[][3], const double x[3], double w[8]) {
+bool EvalLine(const double pts[][3], const double x[3], double w[8], double lc[4]) {
     double dir[3] = {pts[1][0] - pts[0][0], pts[1][1] - pts[0][1], pts[1][2] - pts[0][2]};
     double rel[3] = {x[0] - pts[0][0], x[1] - pts[0][1], x[2] - pts[0][2]};
     const double denom = Dot(dir, dir);
-    if (denom < kDegenerateEps) return EvalVertex(pts, x, w);
+    if (denom < kDegenerateEps) {
+        lc[0] = 0.0;
+        return EvalVertex(pts, x, w);
+    }
     const double t = Dot(rel, dir) / denom;
+    lc[0] = t;
+    w[0] = 1.0 - t;
+    w[1] = t;
 
     // 垂直距离：rel 去掉沿 dir 的分量后的剩余长度
     double perp[3] = {rel[0] - t * dir[0], rel[1] - t * dir[1], rel[2] - t * dir[2]};
@@ -206,8 +212,6 @@ bool EvalLine(const double pts[][3], const double x[3], double w[8]) {
     const double distTol = kRelDistTol * std::sqrt(denom);
     if (perp2 > distTol * distTol) return false;
 
-    w[0] = 1.0 - t;
-    w[1] = t;
     return t >= -kInsideEps && t <= 1.0 + kInsideEps;
 }
 
@@ -216,17 +220,29 @@ bool EvalLine(const double pts[][3], const double x[3], double w[8]) {
 //   (1) 点到三角形**所在平面**的距离足够小——重心坐标只是点在该平面内投影的坐标，
 //       离平面很远的点其投影仍可能落在三角形内部，只判断重心坐标会误判为「在单元内」；
 //   (2) 三个重心坐标均非负（允许 kInsideEps 级别的微小外溢）。
-bool EvalTriangle(const double pts[][3], const double x[3], double w[8]) {
+bool EvalTriangle(const double pts[][3], const double x[3], double w[8], double lc[4]) {
     double v0[3] = {pts[1][0] - pts[0][0], pts[1][1] - pts[0][1], pts[1][2] - pts[0][2]};
     double v1[3] = {pts[2][0] - pts[0][0], pts[2][1] - pts[0][1], pts[2][2] - pts[0][2]};
     double v2[3] = {x[0] - pts[0][0], x[1] - pts[0][1], x[2] - pts[0][2]};
     const double d00 = Dot(v0, v0), d01 = Dot(v0, v1), d11 = Dot(v1, v1);
     const double d20 = Dot(v2, v0), d21 = Dot(v2, v1);
     const double denom = d00 * d11 - d01 * d01;
-    if (std::fabs(denom) < kDegenerateEps) return false;
+    if (std::fabs(denom) < kDegenerateEps) {
+        lc[0] = 0.0;
+        lc[1] = 0.0;
+        w[0] = 1.0;
+        w[1] = 0.0;
+        w[2] = 0.0;
+        return false;
+    }
     const double v = (d11 * d20 - d01 * d21) / denom;
     const double u = (d00 * d21 - d01 * d20) / denom;
     const double t = 1.0 - v - u;
+    lc[0] = v;
+    lc[1] = u;
+    w[0] = t;
+    w[1] = v;
+    w[2] = u;
 
     // 点到平面距离：|(x - p0)·n| / |n|，其中 n = v0 × v1
     double n[3];
@@ -236,20 +252,22 @@ bool EvalTriangle(const double pts[][3], const double x[3], double w[8]) {
     const double dist = std::fabs(Dot(v2, n)) / nlen;
     if (dist > kRelDistTol * CellScale(pts, 3)) return false;
 
-    w[0] = t;
-    w[1] = v;
-    w[2] = u;
     return t >= -kInsideEps && v >= -kInsideEps && u >= -kInsideEps;
 }
 
 // 四面体单元（三维重心坐标，与节点顺序无关）
-bool EvalTetra(const double pts[][3], const double x[3], double w[8]) {
+bool EvalTetra(const double pts[][3], const double x[3], double w[8], double lc[4]) {
     double e1[3] = {pts[1][0] - pts[0][0], pts[1][1] - pts[0][1], pts[1][2] - pts[0][2]};
     double e2[3] = {pts[2][0] - pts[0][0], pts[2][1] - pts[0][1], pts[2][2] - pts[0][2]};
     double e3[3] = {pts[3][0] - pts[0][0], pts[3][1] - pts[0][1], pts[3][2] - pts[0][2]};
     double rhs[3] = {x[0] - pts[0][0], x[1] - pts[0][1], x[2] - pts[0][2]};
     const double det = Det3(e1, e2, e3);
-    if (std::fabs(det) < kDegenerateEps) return false;
+    if (std::fabs(det) < kDegenerateEps) {
+        for (int i = 0; i < 4; ++i) lc[i] = 0.0;
+        w[0] = 1.0;
+        for (int i = 1; i < 4; ++i) w[i] = 0.0;
+        return false;
+    }
     const double w1 = Det3(rhs, e2, e3) / det;
     const double w2 = Det3(e1, rhs, e3) / det;
     const double w3 = Det3(e1, e2, rhs) / det;
@@ -258,6 +276,10 @@ bool EvalTetra(const double pts[][3], const double x[3], double w[8]) {
     w[1] = w1;
     w[2] = w2;
     w[3] = w3;
+    lc[0] = w0;
+    lc[1] = w1;
+    lc[2] = w2;
+    lc[3] = w3;
     return w0 >= -kInsideEps && w1 >= -kInsideEps && w2 >= -kInsideEps && w3 >= -kInsideEps;
 }
 
@@ -266,11 +288,17 @@ bool EvalTetra(const double pts[][3], const double x[3], double w[8]) {
 // 对不平行于 XY 平面、或发生翘曲（warped / 非平面）的四边形会给出错误结果。
 // 这里改为在三维中最小化 ||x - P(r,s)||²，用正规方程 (JᵀJ)δ = Jᵀ(x-P) 迭代，
 // 对任意朝向的四边形都成立；同时用收敛后的残差判断点是否真的落在四边形表面上。
-bool EvalQuad(const double pts[][3], const double x[3], double w[8]) {
+bool EvalQuad(const double pts[][3], const double x[3], double w[8], double lc[4]) {
     const double R[4] = {-1.0, 1.0, 1.0, -1.0};
     const double S[4] = {-1.0, -1.0, 1.0, 1.0};
     const double scale = CellScale(pts, 4);
-    if (scale <= 0.0) return false; // 四点重合，退化
+    if (scale <= 0.0) { // 四点重合，退化
+        lc[0] = 0.0;
+        lc[1] = 0.0;
+        w[0] = 1.0;
+        for (int i = 1; i < 4; ++i) w[i] = 0.0;
+        return false;
+    }
     const double distTol = kRelDistTol * scale;
 
     double r = 0.0, s = 0.0;
@@ -297,21 +325,30 @@ bool EvalQuad(const double pts[][3], const double x[3], double w[8]) {
                             {Dot(dPdr, dPds), Dot(dPds, dPds)}};
         double Jtf[2] = {Dot(dPdr, f), Dot(dPds, f)};
         double delta[2];
-        if (!Solve2(JtJ, Jtf, delta)) return false; // 雅可比奇异，退化四边形
+        if (!Solve2(JtJ, Jtf, delta)) { // 雅可比奇异，退化四边形
+            lc[0] = 0.0;
+            lc[1] = 0.0;
+            w[0] = 1.0;
+            for (int i = 1; i < 4; ++i) w[i] = 0.0;
+            return false;
+        }
         r += delta[0];
         s += delta[1];
         if (std::fabs(delta[0]) < 1.0e-14 && std::fabs(delta[1]) < 1.0e-14) break;
     }
 
+    lc[0] = r;
+    lc[1] = s;
+    for (int i = 0; i < 4; ++i) w[i] = 0.25 * (1.0 + r * R[i]) * (1.0 + s * S[i]);
+
     // 迭代收敛后点仍不在四边形表面上 → 不在单元内
     if (residual2 > distTol * distTol) return false;
     if (std::fabs(r) > 1.0 + kInsideEps || std::fabs(s) > 1.0 + kInsideEps) return false;
-    for (int i = 0; i < 4; ++i) w[i] = 0.25 * (1.0 + r * R[i]) * (1.0 + s * S[i]);
     return true;
 }
 
 // 六面体单元（三线性，Newton 迭代求局部坐标 r,s,t）
-bool EvalHex(const double pts[][3], const double x[3], double w[8]) {
+bool EvalHex(const double pts[][3], const double x[3], double w[8], double lc[4]) {
     const double R[8] = {-1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0};
     const double S[8] = {-1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0};
     const double T[8] = {-1.0, -1.0, -1.0, -1.0, 1.0, 1.0, 1.0, 1.0};
@@ -333,18 +370,141 @@ bool EvalHex(const double pts[][3], const double x[3], double w[8]) {
         }
         double f[3] = {x[0] - P[0], x[1] - P[1], x[2] - P[2]};
         double delta[3];
-        if (!Solve3(dP, f, delta)) return false;
+        if (!Solve3(dP, f, delta)) { // 雅可比奇异，退化六面体
+            lc[0] = 0.0;
+            lc[1] = 0.0;
+            lc[2] = 0.0;
+            w[0] = 1.0;
+            for (int i = 1; i < 8; ++i) w[i] = 0.0;
+            return false;
+        }
         r += delta[0];
         s += delta[1];
         t += delta[2];
         if (std::sqrt(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]) < 1.0e-12) break;
     }
-    if (std::fabs(r) > 1.0 + 1.0e-6 || std::fabs(s) > 1.0 + 1.0e-6 || std::fabs(t) > 1.0 + 1.0e-6) {
-        return false;
-    }
+    lc[0] = r;
+    lc[1] = s;
+    lc[2] = t;
     for (int i = 0; i < 8; ++i) {
         w[i] = 0.125 * (1.0 + r * R[i]) * (1.0 + s * S[i]) * (1.0 + t * T[i]);
     }
+    if (std::fabs(r) > 1.0 + 1.0e-6 || std::fabs(s) > 1.0 + 1.0e-6 || std::fabs(t) > 1.0 + 1.0e-6) {
+        return false;
+    }
+    return true;
+}
+
+// 与 vtkProbeFilter::CELL_TOLERANCE_FACTOR_SQR 一致的单元尺度容差系数
+constexpr double kCellToleranceFactorSqr = 1.0e-6;
+
+// 包围盒对角线长度的平方（等价 vtkDataSet::GetLength2 的量纲）
+double BoxLength2(const std::array<double, 6>& b) {
+    const double dx = b[3] - b[0];
+    const double dy = b[4] - b[1];
+    const double dz = b[5] - b[2];
+    return dx * dx + dy * dy + dz * dz;
+}
+
+// 把单纯形（三角形 / 四面体）的重心权重截断到非负并归一化，
+// 等价 VTK 把 pcoords 截断到单元参数域后重新计算权重。
+void ClampSimplexWeights(double* w, int n) {
+    double sum = 0.0;
+    for (int i = 0; i < n; ++i) {
+        if (w[i] < 0.0) w[i] = 0.0;
+        sum += w[i];
+    }
+    if (sum > kDegenerateEps) {
+        for (int i = 0; i < n; ++i) w[i] /= sum;
+    } else {
+        for (int i = 0; i < n; ++i) w[i] = (i == 0) ? 1.0 : 0.0;
+    }
+}
+
+// 等价 vtkCell::EvaluatePosition 的「最近点」语义：先解出单元局部坐标，再把局部坐标截断到
+// 单元参数域内，用截断后的坐标计算插值权重，并给出点到单元的距离平方 dist2（点在外时 > 0）。
+// 与上面的 EvaluateCell 的区别：EvaluateCell 只回答「点是否严格落在单元内」（布尔判定），
+// 本函数额外给出点位于单元外时的最近点权重与距离，供 vtkProbeFilter 语义的容差判定使用。
+bool EvaluateCellClosest(IGenum cellType, const double pts[][3], int npts, const double x[3],
+                         double weights[8], double& dist2) {
+    static const double RQ[4] = {-1.0, 1.0, 1.0, -1.0};
+    static const double SQ[4] = {-1.0, -1.0, 1.0, 1.0};
+    static const double RH[8] = {-1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0};
+    static const double SH[8] = {-1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0};
+    static const double TH[8] = {-1.0, -1.0, -1.0, -1.0, 1.0, 1.0, 1.0, 1.0};
+
+    double lc[4] = {0.0, 0.0, 0.0, 0.0};
+    double w[8] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    switch (static_cast<IGCellType>(cellType)) {
+        case IG_VERTEX:
+            if (npts < 1) return false;
+            w[0] = 1.0;
+            break;
+        case IG_LINE:
+            if (npts < 2) return false;
+            EvalLine(pts, x, w, lc);
+            lc[0] = std::min(1.0, std::max(0.0, lc[0]));
+            w[0] = 1.0 - lc[0];
+            w[1] = lc[0];
+            break;
+        case IG_TRIANGLE:
+            if (npts < 3) return false;
+            EvalTriangle(pts, x, w, lc);
+            w[0] = 1.0 - lc[0] - lc[1];
+            w[1] = lc[0];
+            w[2] = lc[1];
+            ClampSimplexWeights(w, 3);
+            break;
+        case IG_QUAD:
+            if (npts < 4) return false;
+            EvalQuad(pts, x, w, lc);
+            lc[0] = std::min(1.0, std::max(-1.0, lc[0]));
+            lc[1] = std::min(1.0, std::max(-1.0, lc[1]));
+            for (int i = 0; i < 4; ++i) {
+                w[i] = 0.25 * (1.0 + lc[0] * RQ[i]) * (1.0 + lc[1] * SQ[i]);
+            }
+            break;
+        case IG_TETRA:
+            if (npts < 4) return false;
+            EvalTetra(pts, x, w, lc);
+            ClampSimplexWeights(w, 4);
+            break;
+        case IG_HEXAHEDRON:
+            if (npts < 8) return false;
+            EvalHex(pts, x, w, lc);
+            lc[0] = std::min(1.0, std::max(-1.0, lc[0]));
+            lc[1] = std::min(1.0, std::max(-1.0, lc[1]));
+            lc[2] = std::min(1.0, std::max(-1.0, lc[2]));
+            for (int i = 0; i < 8; ++i) {
+                w[i] = 0.125 * (1.0 + lc[0] * RH[i]) * (1.0 + lc[1] * SH[i]) * (1.0 + lc[2] * TH[i]);
+            }
+            break;
+        default:
+            // IG_PRISM / IG_PYRAMID / IG_POLYGON / IG_POLYHEDRON / 二阶单元暂不支持
+            return false;
+    }
+
+    // 最近点 = Σ w_i · p_i，dist2 = |x - 最近点|²
+    double p[3] = {0.0, 0.0, 0.0};
+    double wsum = 0.0;
+    for (int v = 0; v < npts && v < 8; ++v) {
+        wsum += w[v];
+        p[0] += w[v] * pts[v][0];
+        p[1] += w[v] * pts[v][1];
+        p[2] += w[v] * pts[v][2];
+    }
+    if (std::fabs(wsum) < kDegenerateEps) {
+        p[0] = pts[0][0];
+        p[1] = pts[0][1];
+        p[2] = pts[0][2];
+    } else if (std::fabs(wsum - 1.0) > 1.0e-12) {
+        p[0] /= wsum;
+        p[1] /= wsum;
+        p[2] /= wsum;
+    }
+    const double d[3] = {x[0] - p[0], x[1] - p[1], x[2] - p[2]};
+    dist2 = Dot(d, d);
+    for (int v = 0; v < npts && v < 8; ++v) weights[v] = w[v];
     return true;
 }
 
@@ -353,19 +513,20 @@ bool EvalHex(const double pts[][3], const double x[3], double w[8]) {
 // 注意：四边形/六面体假定节点顺序与 VTK 一致（0..3 / 0..7 规范顺序）。
 bool EvaluateCell(IGenum cellType, const double pts[][3], int npts, const double x[3],
                   double weights[8]) {
+    double lc[4] = {0.0, 0.0, 0.0, 0.0};
     switch (static_cast<IGCellType>(cellType)) {
         case IG_VERTEX:
             return npts >= 1 && EvalVertex(pts, x, weights);
         case IG_LINE:
-            return npts >= 2 && EvalLine(pts, x, weights);
+            return npts >= 2 && EvalLine(pts, x, weights, lc);
         case IG_TRIANGLE:
-            return npts >= 3 && EvalTriangle(pts, x, weights);
+            return npts >= 3 && EvalTriangle(pts, x, weights, lc);
         case IG_QUAD:
-            return npts >= 4 && EvalQuad(pts, x, weights);
+            return npts >= 4 && EvalQuad(pts, x, weights, lc);
         case IG_TETRA:
-            return npts >= 4 && EvalTetra(pts, x, weights);
+            return npts >= 4 && EvalTetra(pts, x, weights, lc);
         case IG_HEXAHEDRON:
-            return npts >= 8 && EvalHex(pts, x, weights);
+            return npts >= 8 && EvalHex(pts, x, weights, lc);
         default:
             // IG_PRISM / IG_PYRAMID / IG_POLYGON / IG_POLYHEDRON / 二阶单元暂不支持，
             // 视作不在单元内。
@@ -696,6 +857,19 @@ bool ResampleToImageFilter::Execute() {
 
     // 对每个源单元，在其包围盒覆盖的格点范围内做探针插值
     // （等价 vtkProbeFilter::ProbeImagePointsInCell：单元定向遍历，而非格点定向）。
+    // 与 vtkProbeFilter 一致的格点判定容差：
+    //   ComputeTolerance = true（默认）→ tol2 = 最大单元长度² × 1e-6
+    //   ComputeTolerance = false       → tol2 = Tolerance²（VTK 中 Tolerance 默认 1.0）
+    double maxCellLength2 = 0.0;
+    for (IGsize cid = 0; cid < numberOfCells; ++cid) {
+        maxCellLength2 = std::max(maxCellLength2, BoxLength2(cellBox[cid]));
+    }
+    const double tol2 = m_ComputeTolerance ? maxCellLength2 * kCellToleranceFactorSqr
+                                           : m_Tolerance * m_Tolerance;
+    const double tolDist = std::sqrt(tol2);
+    // 每个格点当前命中单元的距离平方：0 表示严格落在单元内；点在外时取「更近的单元」覆盖
+    std::vector<double> bestDist2(numberOfGridPoints, std::numeric_limits<double>::max());
+
     std::vector<double> vals(static_cast<size_t>(maxDim));
     double pts[8][3];
     double weights[8];
@@ -728,8 +902,9 @@ bool ResampleToImageFilter::Execute() {
                 lo[ax] = hi[ax] = 0;
                 continue;
             }
-            int a = static_cast<int>(std::floor((bx[ax] - origin[ax]) / spacing[ax]));
-            int b = static_cast<int>(std::ceil((bx[ax + 3] - origin[ax]) / spacing[ax]));
+            // 容差判定允许「单元包围盒外、但距离在 tolDist 内」的格点参与，故外扩 tolDist
+            int a = static_cast<int>(std::floor((bx[ax] - tolDist - origin[ax]) / spacing[ax]));
+            int b = static_cast<int>(std::ceil((bx[ax + 3] + tolDist - origin[ax]) / spacing[ax]));
             if (a < 0) a = 0;
             if (b > dims[ax] - 1) b = dims[ax] - 1;
             if (a > b) {
@@ -745,10 +920,15 @@ bool ResampleToImageFilter::Execute() {
             for (int j = lo[1]; j <= hi[1]; ++j) {
                 for (int i = lo[0]; i <= hi[0]; ++i) {
                     const IGsize ptId = static_cast<IGsize>(i + dims[0] * (j + dims[1] * k));
-                    if (mask->ValueAt(ptId) != 0) continue; // 已被前一个单元探测成功
+                    // 严格命中（dist2 == 0）的格点无需再判定；其余允许被「更近的单元」覆盖
+                    if (mask->ValueAt(ptId) != 0 && bestDist2[ptId] <= 0.0) continue;
                     const double x[3] = {origin[0] + i * spacing[0], origin[1] + j * spacing[1],
                                          origin[2] + k * spacing[2]};
-                    if (!EvaluateCell(cellType, pts, n, x, weights)) continue;
+                    double dist2 = 0.0;
+                    if (!EvaluateCellClosest(cellType, pts, n, x, weights, dist2)) continue;
+                    if (dist2 > tol2) continue;
+                    if (mask->ValueAt(ptId) != 0 && dist2 >= bestDist2[ptId]) continue;
+                    bestDist2[ptId] = dist2;
 
                     mask->ValueAt(ptId) = 1;
                     // 插值源点属性。离散/ID 类数组不做线性插值，改用包含该格点的源单元中

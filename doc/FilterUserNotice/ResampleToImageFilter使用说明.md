@@ -153,8 +153,9 @@ iGame::ResampleToImageFilter::IsCellTypeSupported(type);   // 单个单元类型
    耗时线性增长；可用 `EstimateOutputSize()` 在执行前估算规模并按需调低分辨率。
 6. **空白化显示**：iGame 渲染默认不会自动隐藏 ghost 单元；如需与 ParaView 一致的「有效区域」显示，
    请用 `ModelGeometryFilter` 读取输出上的 `vtkGhostType` 数组（测试用例中已演示）。
-7. **容差**：平面/轴线距离容差取「单元尺度（单元点集最大两两距离）× 1e-6」，参数域边界容差 1e-7。
-   极端细长或退化单元可能因容差而被判为无效，属预期行为。
+7. **容差**：与 `vtkProbeFilter` 一致——格点判定按 `tol2` 进行（默认 `最大单元长度² × 1e-6`，可用
+   `SetComputeTolerance(false)` + `SetTolerance()` 切换为固定容差）；平面/轴线距离另有「单元尺度
+   （单元点集最大两两距离）× 1e-6」的保护性判定。极端细长或退化单元可能因容差而被判为无效，属预期行为。
 
 ## 与 ParaView / VTK 的结果对照
 
@@ -184,14 +185,15 @@ ParaView 的信息面板在统计数组范围时**跳过被 blank（幽灵标记
 100³ 实测显示为：
 
 ```text
-field             | float         | [7.5e-07, 2.24747]
+field             | float         | [7.5000002652814146e-07, 2.2474732398986816]
 vtkValidPointMask | char          | [1, 1]
 vtkGhostType      | unsigned char | [0, 0]        (点)
 vtkGhostType      | unsigned char | [0, 0]        (单元)
 ```
 
+面板按 17 位有效数字输出（`QString::number(v, 'g', 17)`，与 ParaView / VTK 的数值输出精度一致），
 与 ParaView 的 `field float [7.50000026528141461e-07, 2.2474732398986816]`、`vtkValidPointMask [1, 1]`、
-`vtkGhostType [0, 0]` 完全一致。注意**底层数据没有变化**：无效格点仍然是 `0` / mask `0` / ghost `2`、`32`，
+`vtkGhostType [0, 0]` 相同（最小值 ParaView 多打印一位十进制数字，数值本身一致）。注意**底层数据没有变化**：无效格点仍然是 `0` / mask `0` / ghost `2`、`32`，
 用其它不跳过幽灵元组的工具查看时仍会看到这些值。
 
 ### 3. `vtkGhostType` 的数值语义
@@ -200,11 +202,17 @@ vtkGhostType      | unsigned char | [0, 0]        (单元)
 打在 `vtkValidPointMask == 0` 的点/单元上，不是本项目自定义的编码。若某个 VTK/ParaView 版本没有这两个
 数组或值恒为 0，说明该版本的 `vtkResampleToImage` 未做空白化，属于版本差异，不是数值差异。
 
-### 已知尚未对齐的差异
+### 与 VTK 逐项对齐的判定参数
 
-1. **单元内判定容差**：本过滤器用参数域容差（`1e-7`）判定点是否落在单元内；VTK `vtkProbeFilter` 在
-   `ComputeTolerance` 关闭时用 `Tolerance = 1.0`，开启时用 `单元长度² × 1e-6`。常规模型结果一致，
-   极端细长、退化或极薄单元在边界格点上可能有极少数判定不同。
-2. **空点吸附**：VTK 的 `SnapToCellWithClosestPoint` / `ProbeEmptyPoints` 会把没有单元覆盖的格点吸附到
-   最近的单元并置为有效；本过滤器未实现该步骤，这类格点保持 `vtkValidPointMask = 0`。对照时应先确认
-   ParaView 端该项的开关状态，关闭吸附后两边的有效点集合一致。
+1. **单元内判定容差**：已按 `vtkProbeFilter` 语义实现——先解出单元局部坐标，截断到单元参数域后重算权重，
+   再用「点到该最近点的距离」与 `tol2` 比较（等价 `vtkCell::EvaluatePosition` + `FindCell`）：
+   - `SetComputeTolerance(true)`（默认，与 VTK 构造函数一致）：
+     `tol2 = 最大单元长度² × 1e-6`（`vtkProbeFilter::CELL_TOLERANCE_FACTOR_SQR`）；
+   - `SetComputeTolerance(false)`：`tol2 = Tolerance²`，`SetTolerance()` 默认 `1.0`（VTK 默认值）。
+
+   同一格点被多个单元覆盖时取距离最近的单元（等价 VTK 定位器返回最近单元），因此边界格点的取值与
+   VTK 一致。
+2. **空点吸附**：VTK 的吸附由 `SnapToCellWithClosestPoint` 控制，而 VTK 构造函数里该开关**默认是关闭的**
+   （`this->SnapToCellWithClosestPoint = false`），所以默认行为下没有单元覆盖的格点同样保持
+   `vtkValidPointMask = 0`，两边一致。本过滤器尚未实现这个可选吸附步骤；若在 ParaView 中手动打开吸附，
+   这类格点上两边会出现差异。

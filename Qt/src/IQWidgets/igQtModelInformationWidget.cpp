@@ -248,7 +248,11 @@ void igQtModelInformationWidget::updateInformationFrame() {
                             }
                         }
                         if (hasValue) {
-                            rangeText = QStringLiteral("[%1, %2]").arg(rmin).arg(rmax);
+                            // 与 ParaView / VTK 一致：double 按 17 位有效数字输出
+                            // （float 数组经提升后也能给出与 ParaView 相同的十进制形式）
+                            rangeText = QStringLiteral("[%1, %2]")
+                                            .arg(QString::number(rmin, 'g', 17),
+                                                 QString::number(rmax, 'g', 17));
                         }
                     }
                     createPropertyLabel(statForm, QString::fromStdString(arr->GetName()),

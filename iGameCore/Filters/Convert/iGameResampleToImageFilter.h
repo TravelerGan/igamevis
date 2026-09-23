@@ -84,6 +84,19 @@ public:
     //@}
 
     //@{
+    /// 与 VTK vtkProbeFilter 一致的「格点是否落在单元内」容差参数。
+    /// ComputeTolerance 为 true（默认，与 VTK 构造函数一致）时容差按
+    /// tol2 = 最大单元长度² × 1e-6（vtkProbeFilter::CELL_TOLERANCE_FACTOR_SQR）自动推算，
+    /// Tolerance 被忽略；为 false 时 tol2 = Tolerance²（VTK 中 Tolerance 默认 1.0）。
+    /// 判定语义也与 VTK 一致：先解出单元局部坐标，截断到单元参数域后重算权重，
+    /// 用「点到该最近点的距离」与 tol2 比较，而不是只看重心坐标是否非负。
+    void SetTolerance(double t) { m_Tolerance = t; }
+    double GetTolerance() const { return m_Tolerance; }
+    void SetComputeTolerance(bool b) { m_ComputeTolerance = b; }
+    bool GetComputeTolerance() const { return m_ComputeTolerance; }
+    //@}
+
+    //@{
     /// 诊断信息（执行后填充）：支持/不支持的单元类型统计、同名点/单元数组冲突、
     /// 离散数组的非插值处理清单等。供界面提示使用，避免静默的不完整/可疑结果。
     const std::string& GetMessage() const { return m_Message; }
@@ -105,6 +118,8 @@ protected:
     bool UseInputBounds = true;
     bool m_DisableInterpolationForDiscrete{true};
     bool m_FailOnUnsupportedCells{true};
+    double m_Tolerance{1.0};
+    bool m_ComputeTolerance{true};
     std::string m_Message;
 };
 

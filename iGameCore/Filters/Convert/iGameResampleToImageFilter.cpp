@@ -1023,6 +1023,22 @@ bool ResampleToImageFilter::Execute() {
     outAttrs->AddAttribute(IG_SCALAR, IG_POINT, pointGhost);
     outAttrs->AddAttribute(IG_SCALAR, IG_CELL, cellGhost);
 
+    // 继承输入的活动属性：输入模型有颜色是因为它设置了“活动属性”（等价 VTK 的活动标量），
+    // 采样输出虽然已经把源数组按同名同类型带了过来，但活动属性索引默认是 -1，新模型就会以
+    // “无属性 → 统一白色”显示。这里把索引映射到输出中的同名数组，使输出沿用输入的着色。
+    if (DataObject::Pointer inputObject = GetInput(0)) {
+        const int inIndex = inputObject->GetAttributeIndex();
+        if (inIndex >= 0) {
+            auto& inAttr = inputObject->GetAttributeSet()->GetAttribute(inIndex);
+            if (!inAttr.isDeleted && inAttr.pointer) {
+                const int outIndex = outAttrs->GetAttributeIndex(inAttr.pointer->GetName());
+                if (outIndex >= 0) {
+                    output->SetAttributeIndex(outIndex);
+                }
+            }
+        }
+    }
+
     // ---- 诊断信息汇总（供界面提示，避免静默的不完整/可疑结果）----
     {
         IGsize validCount = 0;

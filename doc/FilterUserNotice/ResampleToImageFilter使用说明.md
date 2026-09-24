@@ -216,3 +216,10 @@ vtkGhostType      | unsigned char | [0, 0]        (单元)
    （`this->SnapToCellWithClosestPoint = false`），所以默认行为下没有单元覆盖的格点同样保持
    `vtkValidPointMask = 0`，两边一致。本过滤器尚未实现这个可选吸附步骤；若在 ParaView 中手动打开吸附，
    这类格点上两边会出现差异。
+
+
+## 输出的着色（继承输入的活动属性）
+
+与 ParaView 一致：采样输出会把源数组同名、同类型地带过来，同时继承输入的**活动属性**索引
+（等价 VTK 的 `SetActiveScalars`）。因此输入模型在 iGameVis 里显示成什么颜色，采样结果打开后就是
+同样的颜色映射；在此之前的输出模型活动属性索引是 `-1`，会以统一白色显示。

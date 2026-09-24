@@ -1039,6 +1039,42 @@ bool ResampleToImageFilter::Execute() {
         }
     }
 
+    // 输入没有设置活动属性时（典型场景：文件刚载入，界面上还没在模型树里点过属性），
+    // 自动挑一条默认属性，优先真彩色 IG_RGB，其次第一个非恒定的 IG_SCALAR 点属性，
+    // 这样采样结果依然是有颜色的，而不是统一白色。
+    if (output->GetAttributeIndex() < 0) {
+        std::string pick;
+        for (size_t s = 0; s < srcPointArrays.size() && pick.empty(); ++s) {
+            if (srcPointArrays[s].type == IG_RGB && srcPointArrays[s].arr) {
+                pick = srcPointArrays[s].arr->GetName();
+            }
+        }
+        for (size_t s = 0; s < srcPointArrays.size() && pick.empty(); ++s) {
+            if (srcPointArrays[s].type != IG_SCALAR || !srcPointArrays[s].arr) {
+                continue;
+            }
+            ArrayObject::Pointer arr = srcPointArrays[s].arr;
+            const IGsize n = arr->GetNumberOfElements();
+            if (n == 0) {
+                continue;
+            }
+            const double first = arr->GetElementValue(0, 0);
+            bool varied = false;
+            for (IGsize t = 1; t < n && !varied; ++t) {
+                varied = arr->GetElementValue(t, 0) != first;
+            }
+            if (varied) {
+                pick = arr->GetName();
+            }
+        }
+        if (!pick.empty()) {
+            const int outIndex = outAttrs->GetAttributeIndex(pick);
+            if (outIndex >= 0) {
+                output->SetAttributeIndex(outIndex);
+            }
+        }
+    }
+
     // ---- 诊断信息汇总（供界面提示，避免静默的不完整/可疑结果）----
     {
         IGsize validCount = 0;

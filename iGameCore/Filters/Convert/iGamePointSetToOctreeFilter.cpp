@@ -332,13 +332,35 @@ bool PointSetToOctreeFilter::Execute() {
                 colorAttr = a;
             }
         }
+        // 输入没有活动属性时（典型场景：文件刚载入，界面上还没在模型树里点过属性），
+        // 退化为自动挑一条：优先真彩色 IG_RGB，其次第一个非恒定的 IG_SCALAR 点属性，
+        // 保证输出依然有颜色可看。
         if (!colorAttr.pointer) {
-            // 输入没有活动属性时，退化为第一个真彩色（IG_RGB）点属性
             auto all = inAttrs->GetAllAttributes();
             for (IGsize i = 0; i < all->GetNumberOfElements(); ++i) {
                 auto& a = all->GetElement(i);
                 if (!a.isDeleted && a.pointer && a.attachmentType == IG_POINT && a.type == IG_RGB &&
                     a.pointer->GetNumberOfElements() == numberOfPoints) {
+                    colorAttr = a;
+                    break;
+                }
+            }
+        }
+        if (!colorAttr.pointer) {
+            auto all = inAttrs->GetAllAttributes();
+            for (IGsize i = 0; i < all->GetNumberOfElements(); ++i) {
+                auto& a = all->GetElement(i);
+                if (a.isDeleted || !a.pointer || a.attachmentType != IG_POINT || a.type != IG_SCALAR ||
+                    a.pointer->GetNumberOfElements() != numberOfPoints ||
+                    a.pointer->GetDimension() != 1) {
+                    continue;
+                }
+                const double first = a.pointer->GetElementValue(0, 0);
+                bool varied = false;
+                for (IGsize t = 1; t < numberOfPoints && !varied; ++t) {
+                    varied = a.pointer->GetElementValue(t, 0) != first;
+                }
+                if (varied) {
                     colorAttr = a;
                     break;
                 }

@@ -138,6 +138,10 @@ void StructuredMesh::SetAttributeWithCellData(ArrayObject::Pointer attr, DoubleA
     if (attr == nullptr || m_Points == nullptr || numberOfCells <= 0) {
         // 没有单元（或没有属性）时不能留下过期的单元几何，否则 m_ColorWithCell 与实际几何不匹配
         m_CellPositionSize = 0;
+        // 同理不能保留上一个属性生成的逐点颜色，否则点样式会显示过期颜色
+        m_Colors = FloatArray::New();
+        m_Colors->SetDimension(3);
+        m_Colors->Modified();
         return;
     }
 
@@ -156,6 +160,9 @@ void StructuredMesh::SetAttributeWithCellData(ArrayObject::Pointer attr, DoubleA
     FloatArray::Pointer colors = m_ColorMapper->MapScalars(attr, dimension);
     if (colors == nullptr) {
         m_CellPositionSize = 0;
+        m_Colors = FloatArray::New();
+        m_Colors->SetDimension(3);
+        m_Colors->Modified();
         return;
     }
     const IGsize numberOfColors = colors->GetNumberOfElements();
@@ -168,6 +175,10 @@ void StructuredMesh::SetAttributeWithCellData(ArrayObject::Pointer attr, DoubleA
     newEdgeMasks->SetDimension(3);
 
     float color[3]{};
+    // 点样式（IG_POINTS）绘制的是 m_Positions / m_Colors，单元属性的颜色却只在 m_CellColors 里，
+    // 渲染侧过去只好把点画成纯白。这里同时生成逐点颜色（cell->point 取入射单元颜色平均）。
+    CellToPointColorBuilder pointColors;
+    pointColors.Initialize(this->GetNumberOfPoints());
     // 一个四边形面按扇形剖分为 2 个三角形，与 UnstructuredMesh/SurfaceMesh/VolumeMesh 的
     // 单元着色完全一致（第一个三角形 mask=3，第二个 mask=6）
     auto appendQuad = [&](const igIndex* quad, const float* rgb) {
@@ -195,6 +206,7 @@ void StructuredMesh::SetAttributeWithCellData(ArrayObject::Pointer attr, DoubleA
             const igIndex* cell = nullptr;
             if (m_Volumes->GetCellIds(cid, cell) != Hexahedron::NumberOfPoints) { continue; }
             colors->GetElement(cid, color);
+            pointColors.AddCell(cell, Hexahedron::NumberOfPoints, color);
             for (int f = 0; f < Hexahedron::NumberOfFaces; ++f) {
                 const int* face = Hexahedron::faces[f];
                 const igIndex quad[4] = {cell[face[0]], cell[face[1]], cell[face[2]], cell[face[3]]};
@@ -208,6 +220,7 @@ void StructuredMesh::SetAttributeWithCellData(ArrayObject::Pointer attr, DoubleA
             const igIndex* cell = nullptr;
             if (m_Faces->GetCellIds(cid, cell) != 4) { continue; }
             colors->GetElement(cid, color);
+            pointColors.AddCell(cell, 4, color);
             appendQuad(cell, color);
         }
     }
@@ -222,6 +235,9 @@ void StructuredMesh::SetAttributeWithCellData(ArrayObject::Pointer attr, DoubleA
 
     m_CellTriangleEdgeMasks = newEdgeMasks;
     m_CellTriangleEdgeMasks->Modified();
+
+    m_Colors = pointColors.Build(this->GetDefaultColor());
+    m_Colors->Modified();
 }
 
 //void StructuredMesh::ViewCloudPicture(Scene* scene, int index, int demension) {

@@ -402,7 +402,10 @@ void Model::Draw() {
 #ifdef __EMSCRIPTEN__
                 m_Scene->m_ShaderManager->ApplyWebFallbackUniforms(shader);
 #endif
-                if (!useColor && !colorWithCell) {
+                // 只要不使用顶点颜色就必须给出 inputColor：BlinnPhong.frag 在 ubo.useColor==0 时
+                // 使用 inputColor，未赋值时会落到着色器默认值 vec3(1,1,1)（纯白），
+                // 于是 !useColor && colorWithCell 这一组合会让整个模型变成纯白。
+                if (!useColor) {
                     shader->SetUniform3f("inputColor", defaultColor);
                 }
 

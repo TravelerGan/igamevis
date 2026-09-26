@@ -325,6 +325,11 @@ void DrawObject::ViewCloudPicture(Scene* scene, int index, int dimension) {
         m_AttributeIndex = -1;
         m_AttributeDimension = -1;
         m_UseColor = false;
+        // 关闭着色时必须同时清掉按单元着色的标记：否则会留下 m_UseColor=false 而
+        // m_ColorWithCell=true 的组合，Model::Draw 会去画按单元展开的几何，而 BlinnPhong.frag
+        // 在 ubo.useColor==0 时使用 inputColor，该组合下 inputColor 没有被赋值，
+        // 于是落到着色器默认值 vec3(1,1,1)，整个模型渲染成纯白。
+        m_ColorWithCell = false;
     } else if (GetAttributeSet()->GetNumberOfAttributes() > index) {
         m_AttributeIndex = index;
         m_AttributeDimension = dimension;

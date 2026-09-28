@@ -2373,16 +2373,40 @@ void igQtMainWindow::initAllFilters() {
                         QStringLiteral("端面封端 (Capping)"), "true");
                 const int useDefId = dialog->addParameter(
                         igQtFilterDialogDockWidget::QT_CHECK_BOX,
-                        QStringLiteral("使用默认法向 (Use Default Normal)"), "false");
+                        QStringLiteral("手动指定初始法向 (Use Default Normal)"), "false");
                 const int nxId = dialog->addParameter(
                         igQtFilterDialogDockWidget::QT_LINE_EDIT,
-                        QStringLiteral("默认法向 X (Default Normal X)"), "0");
+                        QStringLiteral("初始法向 X (Normal X)"), "0");
                 const int nyId = dialog->addParameter(
                         igQtFilterDialogDockWidget::QT_LINE_EDIT,
-                        QStringLiteral("默认法向 Y (Default Normal Y)"), "0");
+                        QStringLiteral("初始法向 Y (Normal Y)"), "0");
                 const int nzId = dialog->addParameter(
                         igQtFilterDialogDockWidget::QT_LINE_EDIT,
-                        QStringLiteral("默认法向 Z (Default Normal Z)"), "1");
+                        QStringLiteral("初始法向 Z (Normal Z)"), "1");
+
+                // 加宽面板，避免说明文字与标签过度换行
+                dialog->setFixedWidth(660);
+
+                // “手动指定初始法向”勾选后，下方三个初始法向输入框才可用（默认置灰）
+                auto* useDefCheck = qobject_cast<QCheckBox*>(dialog->getWidget(useDefId));
+                QWidget* nxEdit = dialog->getWidget(nxId);
+                QWidget* nyEdit = dialog->getWidget(nyId);
+                QWidget* nzEdit = dialog->getWidget(nzId);
+                auto syncNormalEditors = [nxEdit, nyEdit, nzEdit](bool on) {
+                    nxEdit->setEnabled(on);
+                    nyEdit->setEnabled(on);
+                    nzEdit->setEnabled(on);
+                };
+                connect(useDefCheck, &QCheckBox::toggled, dialog, syncNormalEditors);
+                syncNormalEditors(false);
+                useDefCheck->setToolTip(QStringLiteral(
+                    "勾选后，使用下方“初始法向 X/Y/Z”指定的方向确定第一个截面的朝向；"
+                    "不勾选（默认）则由程序自动选择（管子起始竖直时也会自动换轴）。"));
+                const QString normalEditTip = QStringLiteral(
+                    "仅在勾选上方“手动指定初始法向”后生效，用于确定第一个截面的初始朝向。");
+                nxEdit->setToolTip(normalEditTip);
+                nyEdit->setToolTip(normalEditTip);
+                nzEdit->setToolTip(normalEditTip);
 
                 dialog->setApplyFunctor([this, dialog, obj, radiusId, sidesId,
                                         capId, useDefId, nxId, nyId, nzId]() {

@@ -5236,6 +5236,443 @@ void igQtMainWindow::initAllFilters() {
         });
     });
 
+    // ===== 简单任务 #7：按标量变形 / 按向量变形（Warp By Scalar / Warp By Vector）=====
+    // ===== 中等任务 #16：追加属性（Append Attributes）=====
+    // 三个入口都直接挂在「算法处理」一级菜单下，与其它算法项并列。
+    {
+        // 变形过滤器只改写点坐标，因此只接受点集派生类型
+        auto resolveWarpInput = [this](DataObject::Pointer& obj, const QString& title) -> bool {
+            obj = nullptr;
+            auto scene = rendererWidget->GetScene();
+            if (scene == nullptr || scene->GetCurrentModel() == nullptr) {
+                showDarkFramelessMessage(title, QStringLiteral("请先在模型树中选择一个模型。"));
+                return false;
+            }
+            obj = scene->GetCurrentModel()->GetDataObject();
+            if (!obj) {
+                showDarkFramelessMessage(title, QStringLiteral("当前模型没有可用的数据对象。"));
+                return false;
+            }
+            const IGenum type = obj->GetDataObjectType();
+            if (type != IG_POINT_SET && type != IG_SURFACE_MESH && type != IG_VOLUME_MESH &&
+                type != IG_UNSTRUCTURED_MESH && type != IG_STRUCTURED_MESH) {
+                showDarkFramelessMessage(
+                        title, QStringLiteral("该算法只支持点集 / 表面网格 / 体网格 / 非结构网格 / 结构网格。"));
+                return false;
+            }
+            return true;
+        };
+
+        struct WarpArrayInfo {
+            QString name;
+            int dimension{1};
+            QString typeName;
+        };
+        auto collectPointArrays = [](DataObject::Pointer obj, std::vector<WarpArrayInfo>& out) {
+            auto attrSet = obj->GetAttributeSet();
+            if (!attrSet) { return; }
+            auto attrs = attrSet->GetAllPointAttributes();
+            if (!attrs) { return; }
+            for (IGsize i = 0; i < attrs->GetNumberOfElements(); ++i) {
+                auto& attr = attrs->GetElement(i);
+                if (attr.IsNone() || !attr.pointer) { continue; }
+                WarpArrayInfo info;
+                info.name = QString::fromStdString(attr.pointer->GetName());
+                info.dimension = attr.pointer->GetDimension();
+                switch (attr.type) {
+                    case IG_SCALAR:
+                        info.typeName = QStringLiteral("标量");
+                        break;
+                    case IG_VECTOR:
+                        info.typeName = QStringLiteral("向量");
+                        break;
+                    case IG_NORMAL:
+                        info.typeName = QStringLiteral("法向");
+                        break;
+                    case IG_TCOORD:
+                        info.typeName = QStringLiteral("纹理坐标");
+                        break;
+                    case IG_TENSOR:
+                        info.typeName = QStringLiteral("张量");
+                        break;
+                    default:
+                        info.typeName = QStringLiteral("属性");
+                        break;
+                }
+                out.push_back(info);
+            }
+        };
+
+        // ---------- 按标量变形 (Warp By Scalar) ----------
+        QAction* warpScalarAction = ui->menu_filters->addAction(QStringLiteral("按标量变形 (Warp By Scalar)"));
+        connect(warpScalarAction, &QAction::triggered, this, [this, resolveWarpInput, collectPointArrays](bool) {
+            DataObject::Pointer obj = nullptr;
+            if (!resolveWarpInput(obj, QStringLiteral("按标量变形"))) { return; }
+
+            std::vector<WarpArrayInfo> arrays;
+            collectPointArrays(obj, arrays);
+            if (arrays.empty()) {
+                showDarkFramelessMessage(QStringLiteral("按标量变形"),
+                                         QStringLiteral("当前模型没有点属性数组，无法按标量变形。\n"
+                                                        "可以先用「转换为点数据」把单元属性转到点上。"));
+                return;
+            }
+            std::vector<QString> items;
+            for (const auto& a: arrays) {
+                items.push_back(QStringLiteral("%1 (%2, %3 分量)").arg(a.name, a.typeName).arg(a.dimension));
+            }
+
+            igQtFilterDialogDockWidget* dialog = new igQtFilterDialogDockWidget(this, true);
+            dialog->setFilterTitle(QStringLiteral("按标量变形 (Warp By Scalar)"));
+            dialog->setFilterDescription(QStringLiteral("沿法向按标量值移动点：x' = x + n * s * 缩放系数。\n"
+                                                        "未勾选「使用指定法向」时优先使用输入的点法向数组，"
+                                                        "缺失时退回下面的法向。"));
+            int arrayId = dialog->addParameter(igQtFilterDialogDockWidget::QT_COMBO_BOX,
+                                               QStringLiteral("标量数组 (Scalars)"), items);
+            int scaleId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                               QStringLiteral("缩放系数 (Scale Factor)"), "1.0");
+            int useNormalId = dialog->addParameter(igQtFilterDialogDockWidget::QT_CHECK_BOX,
+                                                   QStringLiteral("使用指定法向 (Use Normal)"), "false");
+            int nxId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                            QStringLiteral("法向 X (Normal X)"), "0.0");
+            int nyId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                            QStringLiteral("法向 Y (Normal Y)"), "0.0");
+            int nzId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                            QStringLiteral("法向 Z (Normal Z)"), "1.0");
+            int xyPlaneId = dialog->addParameter(igQtFilterDialogDockWidget::QT_CHECK_BOX,
+                                                 QStringLiteral("XY 平面模式 (XY Plane)"), "false");
+
+            dialog->setFixedWidth(360);
+            if (auto* sa = dialog->findChild<QScrollArea*>(QStringLiteral("scrollArea"))) {
+                sa->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+            }
+            dialog->show();
+
+            dialog->setApplyFunctor([=, this]() {
+                bool ok = false;
+                const int choice = dialog->getComboIndex(arrayId, ok);
+                if (!ok || choice < 0 || choice >= static_cast<int>(arrays.size())) {
+                    showDarkFramelessMessage(QStringLiteral("按标量变形"), QStringLiteral("请选择有效的标量数组。"));
+                    return;
+                }
+                const double scale = dialog->getDouble(scaleId, ok);
+                if (!ok) {
+                    showDarkFramelessMessage(QStringLiteral("按标量变形"), QStringLiteral("缩放系数必须是数值。"));
+                    return;
+                }
+                const double nx = dialog->getDouble(nxId, ok);
+                if (!ok) {
+                    showDarkFramelessMessage(QStringLiteral("按标量变形"), QStringLiteral("法向 X 必须是数值。"));
+                    return;
+                }
+                const double ny = dialog->getDouble(nyId, ok);
+                if (!ok) {
+                    showDarkFramelessMessage(QStringLiteral("按标量变形"), QStringLiteral("法向 Y 必须是数值。"));
+                    return;
+                }
+                const double nz = dialog->getDouble(nzId, ok);
+                if (!ok) {
+                    showDarkFramelessMessage(QStringLiteral("按标量变形"), QStringLiteral("法向 Z 必须是数值。"));
+                    return;
+                }
+                const bool useNormal = dialog->getChecked(useNormalId, ok);
+                const bool xyPlane = dialog->getChecked(xyPlaneId, ok);
+
+                auto filter = WarpByScalarFilter::New();
+                filter->SetScalarsArrayName(arrays[static_cast<size_t>(choice)].name.toStdString());
+                filter->SetScaleFactor(scale);
+                filter->SetUseNormal(useNormal);
+                filter->SetNormal(nx, ny, nz);
+                filter->SetXYPlane(xyPlane);
+                filter->SetInput(obj);
+                if (!filter->Execute()) {
+                    showDarkFramelessMessage(QStringLiteral("按标量变形"),
+                                             QStringLiteral("变形失败：请检查标量数组与法向设置。"));
+                    return;
+                }
+                auto output = filter->GetOutput();
+                if (!output) {
+                    showDarkFramelessMessage(QStringLiteral("按标量变形"), QStringLiteral("算法未产生有效结果。"));
+                    return;
+                }
+                output->SetName(obj->GetName() + "_warp_scalar");
+                modelTreeWidget->addDataObjectToModelTree(output, Algorithm);
+                rendererWidget->GetScene()->Modified();
+                rendererWidget->GetScene()->Update();
+                rendererWidget->update();
+                dialog->close();
+            });
+        });
+
+        // ---------- 按向量变形 (Warp By Vector) ----------
+        QAction* warpVectorAction = ui->menu_filters->addAction(QStringLiteral("按向量变形 (Warp By Vector)"));
+        connect(warpVectorAction, &QAction::triggered, this, [this, resolveWarpInput, collectPointArrays](bool) {
+            DataObject::Pointer obj = nullptr;
+            if (!resolveWarpInput(obj, QStringLiteral("按向量变形"))) { return; }
+
+            std::vector<WarpArrayInfo> allArrays;
+            collectPointArrays(obj, allArrays);
+            std::vector<WarpArrayInfo> arrays; // 只保留 3 分量的点向量（与 VTK 要求一致）
+            for (const auto& a: allArrays) {
+                if (a.dimension == 3) { arrays.push_back(a); }
+            }
+            if (arrays.empty()) {
+                showDarkFramelessMessage(QStringLiteral("按向量变形"),
+                                         QStringLiteral("当前模型没有 3 分量的点向量数组，无法按向量变形。\n"
+                                                        "可以先用「转换为点数据」或「面/点法向量计算」生成点向量。"));
+                return;
+            }
+            std::vector<QString> items;
+            for (const auto& a: arrays) {
+                items.push_back(QStringLiteral("%1 (%2, %3 分量)").arg(a.name, a.typeName).arg(a.dimension));
+            }
+
+            igQtFilterDialogDockWidget* dialog = new igQtFilterDialogDockWidget(this, true);
+            dialog->setFilterTitle(QStringLiteral("按向量变形 (Warp By Vector)"));
+            dialog->setFilterDescription(QStringLiteral("按点向量移动点：x' = x + v * 缩放系数。"));
+            int arrayId = dialog->addParameter(igQtFilterDialogDockWidget::QT_COMBO_BOX,
+                                               QStringLiteral("向量数组 (Vectors)"), items);
+            int scaleId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                               QStringLiteral("缩放系数 (Scale Factor)"), "1.0");
+
+            dialog->setFixedWidth(360);
+            if (auto* sa = dialog->findChild<QScrollArea*>(QStringLiteral("scrollArea"))) {
+                sa->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+            }
+            dialog->show();
+
+            dialog->setApplyFunctor([=, this]() {
+                bool ok = false;
+                const int choice = dialog->getComboIndex(arrayId, ok);
+                if (!ok || choice < 0 || choice >= static_cast<int>(arrays.size())) {
+                    showDarkFramelessMessage(QStringLiteral("按向量变形"), QStringLiteral("请选择有效的向量数组。"));
+                    return;
+                }
+                const double scale = dialog->getDouble(scaleId, ok);
+                if (!ok) {
+                    showDarkFramelessMessage(QStringLiteral("按向量变形"), QStringLiteral("缩放系数必须是数值。"));
+                    return;
+                }
+
+                auto filter = WarpByVectorFilter::New();
+                filter->SetVectorsArrayName(arrays[static_cast<size_t>(choice)].name.toStdString());
+                filter->SetScaleFactor(scale);
+                filter->SetInput(obj);
+                if (!filter->Execute()) {
+                    showDarkFramelessMessage(QStringLiteral("按向量变形"),
+                                             QStringLiteral("变形失败：请检查向量数组是否为 3 分量。"));
+                    return;
+                }
+                auto output = filter->GetOutput();
+                if (!output) {
+                    showDarkFramelessMessage(QStringLiteral("按向量变形"), QStringLiteral("算法未产生有效结果。"));
+                    return;
+                }
+                output->SetName(obj->GetName() + "_warp_vector");
+                modelTreeWidget->addDataObjectToModelTree(output, Algorithm);
+                rendererWidget->GetScene()->Modified();
+                rendererWidget->GetScene()->Update();
+                rendererWidget->update();
+                dialog->close();
+            });
+        });
+
+        // ---------- 追加属性 (Append Attributes) ----------
+        QAction* appendAttributesAction =
+                ui->menu_filters->addAction(QStringLiteral("追加属性 (Append Attributes)"));
+        connect(appendAttributesAction, &QAction::triggered, this, [this](bool) {
+            auto scene = rendererWidget->GetScene();
+            if (scene == nullptr) { return; }
+            auto modelList = scene->GetModelList();
+            if (!modelList) { return; }
+
+            struct AppendInputInfo {
+                QString name;
+                DataObject::Pointer object;
+                IGsize points{0};
+                IGsize cells{0};
+            };
+            // 计算单元数，用于在界面上提示各输入是否逐项对应
+            auto cellCountOf = [](DataObject::Pointer obj) -> IGsize {
+                switch (obj->GetDataObjectType()) {
+                    case IG_POINT_SET:
+                        return 0;
+                    case IG_SURFACE_MESH: {
+                        auto mesh = DynamicCast<SurfaceMesh>(obj);
+                        return mesh ? mesh->GetNumberOfFaces() : IGsize(0);
+                    }
+                    case IG_VOLUME_MESH: {
+                        auto mesh = DynamicCast<VolumeMesh>(obj);
+                        return mesh ? mesh->GetNumberOfVolumes() : IGsize(0);
+                    }
+                    case IG_UNSTRUCTURED_MESH: {
+                        auto mesh = DynamicCast<UnstructuredMesh>(obj);
+                        return mesh ? mesh->GetNumberOfCells() : IGsize(0);
+                    }
+                    case IG_STRUCTURED_MESH: {
+                        auto mesh = DynamicCast<StructuredMesh>(obj);
+                        return mesh ? mesh->GetNumberOfCells() : IGsize(0);
+                    }
+                    default: {
+                        auto cells = obj->GetCellArray();
+                        return cells ? cells->GetNumberOfCells() : IGsize(0);
+                    }
+                }
+            };
+
+            std::vector<AppendInputInfo> infos;
+            for (auto it = modelList->Begin(); it != modelList->End(); ++it) {
+                auto model = it->second;
+                if (!model) { continue; }
+                auto dataObj = model->GetDataObject();
+                if (!dataObj) { continue; }
+                const IGenum type = dataObj->GetDataObjectType();
+                if (type != IG_POINT_SET && type != IG_SURFACE_MESH && type != IG_VOLUME_MESH &&
+                    type != IG_UNSTRUCTURED_MESH && type != IG_STRUCTURED_MESH) {
+                    continue;
+                }
+                AppendInputInfo info;
+                info.object = dataObj;
+                info.name = QString::fromStdString(dataObj->GetName());
+                auto pts = dataObj->GetPoints();
+                info.points = pts ? pts->GetNumberOfPoints() : IGsize(0);
+                info.cells = cellCountOf(dataObj);
+                infos.push_back(info);
+            }
+            if (infos.empty()) {
+                showDarkFramelessMessage(QStringLiteral("追加属性"),
+                                         QStringLiteral("场景中没有可用于追加属性的数据对象。"));
+                return;
+            }
+
+            igQtChromeFramelessDialog* dlg = new igQtChromeFramelessDialog(this);
+            dlg->setDialogTitle(QStringLiteral("追加属性 (Append Attributes)"));
+            dlg->setMaximizeEnabled(false);
+            dlg->setAttribute(Qt::WA_DeleteOnClose);
+
+            QWidget* content = new QWidget(dlg->contentHost());
+            content->setStyleSheet(
+                    "QWidget { background-color: #252526; color: #D4D4D4; }"
+                    "QCheckBox { color: #D4D4D4; spacing: 6px; }"
+                    "QCheckBox::indicator { width: 16px; height: 16px; }"
+                    "QCheckBox::indicator:unchecked { border: 1px solid #6A6A6A; background-color: #3A3A3A; }"
+                    "QCheckBox::indicator:checked { border: 1px solid #0E639C; background-color: #0E639C; }"
+                    "QCheckBox::indicator:unchecked:hover { border: 1px solid #9A9A9A; }"
+                    "QCheckBox::indicator:checked:hover { background-color: #1177BB; }"
+                    "QPushButton { background-color: #3A3A3A; color: #D4D4D4; border: 1px solid #4A4A4A; "
+                    "              padding: 6px 12px; border-radius: 4px; }"
+                    "QPushButton:hover { background-color: #4A4A4A; border-color: #5A5A5A; }"
+                    "QPushButton:pressed { background-color: #2A2A2A; }"
+                    "QScrollArea { background-color: #1E1E1E; border: none; }"
+                    "QScrollBar:vertical { background: #1E1E1E; width: 10px; margin: 0; }"
+                    "QScrollBar::handle:vertical { background: #4A4A4A; border-radius: 5px; min-height: 20px; }"
+                    "QScrollBar::handle:vertical:hover { background: #5A5A5A; }"
+                    "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }");
+            QVBoxLayout* mainLayout = new QVBoxLayout(content);
+            mainLayout->setContentsMargins(12, 12, 12, 12);
+            mainLayout->setSpacing(8);
+
+            QLabel* tip = new QLabel(
+                    QStringLiteral("选择要合并属性的数据对象（列表顺序即输入顺序，第一个提供输出几何与数据类型）。\n"
+                                   "要求所选对象的点数和单元数逐项对应；同名的属性只保留最先出现的那一份。"),
+                    content);
+            tip->setWordWrap(true);
+            mainLayout->addWidget(tip);
+
+            QHBoxLayout* btnLayout = new QHBoxLayout();
+            QPushButton* selectAllBtn = new QPushButton(QStringLiteral("全选"), content);
+            QPushButton* deselectAllBtn = new QPushButton(QStringLiteral("全不选"), content);
+            btnLayout->addWidget(selectAllBtn);
+            btnLayout->addWidget(deselectAllBtn);
+            btnLayout->addStretch();
+            mainLayout->addLayout(btnLayout);
+
+            QScrollArea* scrollArea = new QScrollArea(content);
+            scrollArea->setWidgetResizable(true);
+            scrollArea->setFrameShape(QFrame::NoFrame);
+            QWidget* listWidget = new QWidget(scrollArea);
+            QVBoxLayout* listLayout = new QVBoxLayout(listWidget);
+            listLayout->setSpacing(4);
+            listLayout->setContentsMargins(0, 0, 0, 0);
+            QList<QCheckBox*> checkBoxes;
+            for (const AppendInputInfo& info: infos) {
+                QCheckBox* cb = new QCheckBox(QStringLiteral("%1  (点: %2, 单元: %3)")
+                                                      .arg(info.name)
+                                                      .arg(info.points)
+                                                      .arg(info.cells),
+                                              listWidget);
+                cb->setChecked(true);
+                checkBoxes.append(cb);
+                listLayout->addWidget(cb);
+            }
+            listWidget->setLayout(listLayout);
+            scrollArea->setWidget(listWidget);
+            mainLayout->addWidget(scrollArea);
+
+            QCheckBox* pointCb = new QCheckBox(QStringLiteral("追加点属性 (Point Data)"), content);
+            pointCb->setChecked(true);
+            QCheckBox* cellCb = new QCheckBox(QStringLiteral("追加单元属性 (Cell Data)"), content);
+            cellCb->setChecked(true);
+            mainLayout->addWidget(pointCb);
+            mainLayout->addWidget(cellCb);
+
+            QDialogButtonBox* buttonBox =
+                    new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, content);
+            mainLayout->addWidget(buttonBox);
+
+            dlg->setContentWidget(content);
+            dlg->resize(440, 540);
+
+            connect(selectAllBtn, &QPushButton::clicked, [checkBoxes]() {
+                for (QCheckBox* cb: checkBoxes) { cb->setChecked(true); }
+            });
+            connect(deselectAllBtn, &QPushButton::clicked, [checkBoxes]() {
+                for (QCheckBox* cb: checkBoxes) { cb->setChecked(false); }
+            });
+            connect(buttonBox, &QDialogButtonBox::accepted, this, [this, dlg, checkBoxes, infos, pointCb, cellCb]() {
+                std::vector<DataObject::Pointer> selected;
+                for (int i = 0; i < checkBoxes.size(); ++i) {
+                    if (checkBoxes[i]->isChecked()) { selected.push_back(infos[i].object); }
+                }
+                if (selected.empty()) {
+                    showDarkFramelessMessage(QStringLiteral("追加属性"), QStringLiteral("请至少选择一个数据对象。"));
+                    return;
+                }
+                if (!pointCb->isChecked() && !cellCb->isChecked()) {
+                    showDarkFramelessMessage(QStringLiteral("追加属性"),
+                                             QStringLiteral("请至少勾选「点属性」或「单元属性」之一。"));
+                    return;
+                }
+
+                auto filter = AppendAttributesFilter::New();
+                for (const auto& obj: selected) { filter->AddInput(obj); }
+                filter->SetAppendPointData(pointCb->isChecked());
+                filter->SetAppendCellData(cellCb->isChecked());
+
+                if (!filter->Execute()) {
+                    showDarkFramelessMessage(
+                            QStringLiteral("追加属性"),
+                            QStringLiteral("执行失败：请确认所选数据对象的点数与单元数逐项对应。"));
+                    return;
+                }
+                auto output = filter->GetOutput();
+                if (!output) {
+                    showDarkFramelessMessage(QStringLiteral("追加属性"), QStringLiteral("算法未产生有效结果。"));
+                    return;
+                }
+                output->SetName(selected[0]->GetName() + "_appended");
+                modelTreeWidget->addDataObjectToModelTree(output, Algorithm);
+                rendererWidget->GetScene()->Modified();
+                rendererWidget->GetScene()->Update();
+                rendererWidget->update();
+                dlg->accept();
+            });
+            connect(buttonBox, &QDialogButtonBox::rejected, dlg, &QDialog::reject);
+
+            dlg->show();
+        });
+    }
+
     connect(ui->menu_filters->addAction(QStringLiteral("体采样 (Volume Interpolation)")), &QAction::triggered, this,
             [this](bool) {
                 auto scene = iGame::SceneManager::Instance()->GetCurrentScene();

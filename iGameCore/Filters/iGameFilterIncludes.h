@@ -73,3 +73,6 @@
 #include "PointLineInterpolator/iGamePointLineInterpolatorFilter.h"
 
 #include "AppendReduce/iGameAppendReduceFilter.h"
+#include "AppendAttributes/iGameAppendAttributesFilter.h"
+#include "Warp/iGameWarpByScalarFilter.h"
+#include "Warp/iGameWarpByVectorFilter.h"

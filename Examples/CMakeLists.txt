@@ -57,8 +57,8 @@ else ()
     add_custom_target(iGameDeployExampleRuntime)
 endif ()
 
-# ±ØÐëÓë±àÒë iGameCore Ê±Ò»ÖÂ£¬·ñÔò Scene µÈÀàÐÍ²¼¾Ö²»Í¬£¨Èç GL_SUPPORT_MSAA£©£¬
-# Scene::New »áÔÚÔËÐÐÆÚÖ±½Ó¶ÑËð»µ±ÀÀ£¡£ÂãÁ´ ${IGAMEVIS_CORE_LIB_TARGETS} ²»»á×Ô¶¯´øÉÏÕâÐ©ºê¡£
+# ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ iGameCore Ê±Ò»ï¿½Â£ï¿½ï¿½ï¿½ï¿½ï¿½ Scene ï¿½ï¿½ï¿½ï¿½ï¿½Í²ï¿½ï¿½Ö²ï¿½Í¬ï¿½ï¿½ï¿½ï¿½ GL_SUPPORT_MSAAï¿½ï¿½ï¿½ï¿½
+# Scene::New ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö±ï¿½Ó¶ï¿½ï¿½ð»µ±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ${IGAMEVIS_CORE_LIB_TARGETS} ï¿½ï¿½ï¿½ï¿½ï¿½Ô¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð©ï¿½ê¡£
 add_compile_definitions(
     IGAME_PLATFORM_WINDOWS
     $<$<PLATFORM_ID:Windows>:PLATFORM_WINDOWS>
@@ -371,7 +371,7 @@ igame_add_example(testBoundaryMeshQuality Filter/TestBoundaryMeshQuality.cpp)
 # Probe
 igame_add_example(testProbe Filter/Probe/TestProbe.cpp)
 
-# ¼òµ¥ÈÎÎñ #5 + ÖÐµÈÈÎÎñ #28 ÅäÌ×²âÊÔÓÃÀý
+# ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ #5 + ï¿½Ðµï¿½ï¿½ï¿½ï¿½ï¿½ #28 ï¿½ï¿½ï¿½×²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 igame_add_example(testCountCellVertices Filter/TestCountCellVertices.cpp)
 igame_add_example(testExtractEdges Filter/TestExtractEdges.cpp)
 
@@ -395,6 +395,7 @@ igame_add_example(testCellSizeExtraction Filter/FeatureExtraction/CellSizeExtrac
 
 igame_add_example(TestValidateCellsFilter Filter/MyFilter/TestValidateCellsFilter.cpp)
 igame_add_example(TestSurfaceNormalsFilter Filter/SurfaceNormals/TestSurfaceNormalsFilter.cpp)
+igame_add_example(TestSubdivideFilter Filter/Subdivide/TestSubdivideFilter.cpp)
 
 # Feature edges console test
 igame_add_example(

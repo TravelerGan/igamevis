@@ -2338,6 +2338,107 @@ void igQtMainWindow::initAllFilters() {
                                          true);
             });
 
+    connect(ui->menu_filters->addAction(QStringLiteral("管道生成 (Tube)")), &QAction::triggered, this,
+            [this](bool checked) {
+                auto* scene = rendererWidget->GetScene();
+                if (scene == nullptr || scene->GetCurrentModel() == nullptr) {
+                    showDarkFramelessMessage(QStringLiteral("无可用模型"),
+                                             QStringLiteral("请先加载并选择一个网格模型。"));
+                    return;
+                }
+                auto model = scene->GetCurrentModel();
+                auto obj = model->GetDataObject();
+                if (obj == nullptr) {
+                    showDarkFramelessMessage(QStringLiteral("无可用数据"),
+                                             QStringLiteral("当前模型没有可用的网格数据。"));
+                    return;
+                }
+
+                igQtFilterDialogDockWidget* dialog = new igQtFilterDialogDockWidget(this, true);
+                dialog->setFilterTitle(QStringLiteral("管道生成 (Tube)"));
+                dialog->setFilterDescription(QStringLiteral(
+                    "将线段（如流线、折线）沿路径扫掠成圆管。<br>"
+                    "在每个路径点上确定垂直于前进方向的平面，画一个由半径和边数决定的正多边形截面，"
+                    "再沿路径对齐、缝合。<br>"
+                    "截面朝向通过平行传递延续，不会翻转；首尾可用端面封闭。"));
+
+                const int radiusId = dialog->addParameter(
+                        igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                        QStringLiteral("半径 (Radius)"), "0.1");
+                const int sidesId = dialog->addParameter(
+                        igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                        QStringLiteral("边数 (Number Of Sides)"), "6");
+                const int capId = dialog->addParameter(
+                        igQtFilterDialogDockWidget::QT_CHECK_BOX,
+                        QStringLiteral("端面封端 (Capping)"), "true");
+                const int useDefId = dialog->addParameter(
+                        igQtFilterDialogDockWidget::QT_CHECK_BOX,
+                        QStringLiteral("使用默认法向 (Use Default Normal)"), "false");
+                const int nxId = dialog->addParameter(
+                        igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                        QStringLiteral("默认法向 X (Default Normal X)"), "0");
+                const int nyId = dialog->addParameter(
+                        igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                        QStringLiteral("默认法向 Y (Default Normal Y)"), "0");
+                const int nzId = dialog->addParameter(
+                        igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                        QStringLiteral("默认法向 Z (Default Normal Z)"), "1");
+
+                dialog->setApplyFunctor([this, dialog, obj, radiusId, sidesId,
+                                        capId, useDefId, nxId, nyId, nzId]() {
+                    bool rok = false, sok = false,
+                         cok = false, uok = false,
+                         xok = false, yok = false, zok = false;
+
+                    double radius = dialog->getDouble(radiusId, rok);
+                    int sides = dialog->getInt(sidesId, sok);
+                    bool capping = dialog->getChecked(capId, cok);
+                    bool useDef = dialog->getChecked(useDefId, uok);
+                    double nx = dialog->getDouble(nxId, xok);
+                    double ny = dialog->getDouble(nyId, yok);
+                    double nz = dialog->getDouble(nzId, zok);
+
+                    if (!rok || radius <= 0.0) {
+                        showDarkFramelessMessage(QStringLiteral("参数错误"),
+                                                 QStringLiteral("半径必须是大于 0 的数字。"));
+                        return;
+                    }
+                    if (!sok || sides < 3) {
+                        showDarkFramelessMessage(QStringLiteral("参数错误"),
+                                                 QStringLiteral("边数必须是不小于 3 的整数。"));
+                        return;
+                    }
+
+                    TubeFilter::Pointer filter = TubeFilter::New();
+                    filter->SetInput(obj);
+                    filter->SetRadius(radius);
+                    filter->SetNumberOfSides(sides);
+                    filter->SetCapping(cok ? capping : true);
+                    filter->SetUseDefaultNormal(uok ? useDef : false);
+                    if (xok && yok && zok)
+                        filter->SetDefaultNormal(Vector3d(nx, ny, nz));
+
+                    if (!filter->Execute()) {
+                        showDarkFramelessMessage(
+                                QStringLiteral("数据类型不匹配"),
+                                QStringLiteral("管道生成仅支持含线段（IG_LINE / IG_POLY_LINE）的"
+                                               "非结构网格或表面网格，请检查输入数据类型。"));
+                        return;
+                    }
+
+auto outMesh = DynamicCast<SurfaceMesh>(filter->GetOutput());
+                    modelTreeWidget->addDataObjectToModelTree(outMesh, Algorithm);
+                    rendererWidget->update();
+                    // 先弹模态提示（此时参数面板仍在、主窗口布局稳定），
+                    // 用户点“确定”返回后再关闭面板，避免先 close dock 触发布局
+                    // 重建、紧接着开模态对话框而导致 Qt 访问违例。
+                    showDarkFramelessMessage(QStringLiteral("管道生成完成"),
+                                             QStringLiteral("已将线段转换为圆管，可在模型树中查看输出结果。"),
+                                             true);
+                    dialog->close();
+                });
+                dialog->show();
+            });
 
     // 直接置于“算法处理”一级菜单；具体界面和交互由独立面板负责。
     QAction* extractLocationAction = ui->menu_filters->addAction(QStringLiteral("提取指定位置数据 (Extract Location)"));

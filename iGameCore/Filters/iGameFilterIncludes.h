@@ -43,6 +43,7 @@
 #include "Tests/iGameSurfaceMeshFilterTest.h"
 #include "Tests/iGameVolumeMeshFilterTest.h"
 #include "SurfaceNormals/iGameSurfaceNormalsFilter.h"
+#include "Subdivide/iGameSubdivide.h"
 #include "MyFilter/iGameValidateCellsFilter.h"
 #include "VariableCorrelation/iGameGenerateVariableCorrelationDataFilter.h"
 #include "VariableDensity/iGameGenerateVariableDensityDataFilter.h"

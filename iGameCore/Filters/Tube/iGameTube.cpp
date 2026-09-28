@@ -222,7 +222,7 @@ bool TubeFilter::Execute() {
             }
         }
 
-        // 2.6 相邻 ring 缝合：每个侧面输出一个四边形 quad（法向朝外，与 ParaView 一致）
+        // 2.6 相邻 ring 缝合：每个四边形拆 2 个三角形（法向朝外）
         for (int i = 0; i < n - 1; ++i) {
             for (int k = 0; k < sides; ++k) {
                 int k2 = (k + 1) % sides;
@@ -230,26 +230,23 @@ bool TubeFilter::Execute() {
                 igIndex Bp = ring[i][k2];
                 igIndex C = ring[i + 1][k2];
                 igIndex D = ring[i + 1][k];
-                outFaces->AddCellId4(A, Bp, C, D);
+                outFaces->AddCellId3(A, Bp, C);
+                outFaces->AddCellId3(A, C, D);
             }
         }
 
-        // 2.7 封端：首、尾各一个 sides 边形，直接复用首/尾环上已有的点
-        //    （不新增中心点，与 ParaView 一致）；环绕方向保证法向朝外。
+        // 2.7 封端（三角形扇，法向朝外）
         if (m_Capping) {
-            std::vector<igIndex> capIds(sides);
-
-            // 起始端：外法向 -T，环点按 k 递减排列
+            igIndex c0 = addOut(path[0].first, path[0].second);
             for (int k = 0; k < sides; ++k) {
-                capIds[k] = ring[0][sides - 1 - k];
+                int k2 = (k + 1) % sides;
+                outFaces->AddCellId3(c0, ring[0][k2], ring[0][k]);
             }
-            outFaces->AddCellIds(capIds.data(), sides);
-
-            // 终止端：外法向 +T，环点按 k 递增排列
+            igIndex cn = addOut(path[n - 1].first, path[n - 1].second);
             for (int k = 0; k < sides; ++k) {
-                capIds[k] = ring[n - 1][k];
+                int k2 = (k + 1) % sides;
+                outFaces->AddCellId3(cn, ring[n - 1][k], ring[n - 1][k2]);
             }
-            outFaces->AddCellIds(capIds.data(), sides);
         }
     }
 

@@ -1,6 +1,6 @@
-#include "Warp/iGameWarpByScalarFilter.h"
+#include "WarpByScalar/iGameWarpByScalarFilter.h"
 
-#include "Warp/iGameWarpSupport.h"
+#include "WarpByScalar/iGameWarpSupport.h"
 
 #include "iGameMacro.h"
 #include "iGamePointSet.h"

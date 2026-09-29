@@ -136,6 +136,7 @@ public:
     QDockWidget* PointAndCellIdsDockWidget{nullptr};
     igQtPointAndCellIdsWidget* PointAndCellIdsWidget{nullptr};
     int m_pointAndCellIdsCount{0};
+    int m_outlineCount{0};
 
 private slots:
     void updateRecentFilePaths();

@@ -3474,6 +3474,48 @@ void igQtMainWindow::initAllFilters() {
 
     QMenu* view = ui->menu_filters->addMenu("特征提取");
 
+    QAction* outlineAction = view->addAction(QStringLiteral("生成包围盒 (Outline)"));
+    outlineAction->setObjectName(QStringLiteral("action_Outline"));
+    connect(outlineAction, &QAction::triggered, this, [this](bool) {
+        auto scene = rendererWidget->GetScene();
+        auto model = scene ? scene->GetCurrentModel() : nullptr;
+        if (!model) {
+            showDarkFramelessMessage(QStringLiteral("无可用模型"),
+                                     QStringLiteral("请先加载并在模型树中选择一个模型。"));
+            return;
+        }
+
+        auto input = model->GetDataObject();
+        if (!input) {
+            showDarkFramelessMessage(QStringLiteral("无可用模型"),
+                                     QStringLiteral("当前模型没有可用数据。"));
+            return;
+        }
+
+        auto filter = OutlineFilter::New();
+        filter->SetInput(input);
+        if (!filter->Execute()) {
+            showDarkFramelessMessage(QStringLiteral("生成包围盒失败"),
+                                     QString::fromStdString(filter->GetMessage()));
+            return;
+        }
+
+        auto output = DynamicCast<DrawObject>(filter->GetOutput());
+        if (!output) {
+            showDarkFramelessMessage(QStringLiteral("生成包围盒失败"),
+                                     QStringLiteral("包围盒输出为空或无法显示。"));
+            return;
+        }
+
+        // 将白色包围盒作为独立结果加入模型树
+        output->SetName(QStringLiteral("Outline_%1").arg(++m_outlineCount).toStdString());
+        output->SetViewStyle(IG_WIREFRAME);
+        output->SetLineColor(igm::vec3(1.0f, 1.0f, 1.0f));
+        output->SetLineWidth(2.0f);
+        modelTreeWidget->addDataObjectToModelTree(output, Algorithm);
+        rendererWidget->update();
+    });
+
     QAction* outlineCorners = view->addAction(QStringLiteral("提取包围盒角点 (Outline Corners)"));
     connect(outlineCorners, &QAction::triggered, this, [this](bool) {
         auto scene = rendererWidget->GetScene();

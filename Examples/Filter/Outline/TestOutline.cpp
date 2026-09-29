@@ -140,7 +140,7 @@ int main(int argc, char* argv[]) {
 
     // 同时显示自行车和包围盒
     input->SetViewStyle(IG_SURFACE);
-    output->SetLineColor(igm::vec3(1.0f, 0.2f, 0.1f));
+    output->SetLineColor(igm::vec3(1.0f, 1.0f, 1.0f));
     output->SetLineWidth(2.0f);
     auto scene = Scene::New();
     scene->AddModel(input);

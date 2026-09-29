@@ -5805,7 +5805,7 @@ void igQtMainWindow::initAllFilters() {
                 dialog->close();
             });
         });
-    connect(ui->menu_filters->addAction(QStringLiteral("体采样 (Volume Interpolation)")), &QAction::triggered, this,
+    connect(ui->menu_filters->addAction(QStringLiteral("点体积插值 (Point Volume Interpolator)")), &QAction::triggered, this,
             [this](bool) {
                 auto scene = iGame::SceneManager::Instance()->GetCurrentScene();
                 if (scene == nullptr || scene->GetCurrentModel() == nullptr) {

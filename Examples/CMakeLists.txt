@@ -283,6 +283,7 @@ igame_add_example(testConvertToVertex Filter/Convert/TestConvertToVertex.cpp)
 
 # Axis aligned reflection
 igame_add_example(testAxisAlignedReflection Filter/AxisAlignedReflection/TestAxisAlignedReflection.cpp)
+igame_add_example(testOutline Filter/Outline/TestOutline.cpp)
 
 # My Filters
 igame_add_example(testExtractCellsByType Filter/MyFilter/TestExtractCellsByType.cpp)

@@ -22,10 +22,10 @@ IGAME_NAMESPACE_BEGIN
  *
  * 输出是一个新的数据对象（拓扑、属性与输入一致，仅点坐标改变），不修改输入。
  */
-class WarpByScalarFilter : public Filter {
+class WarpByScalar : public Filter {
 public:
-    I_OBJECT(WarpByScalarFilter);
-    static Pointer New() { return new WarpByScalarFilter; }
+    I_OBJECT(WarpByScalar);
+    static Pointer New() { return new WarpByScalar; }
 
     /// 用于变形的点标量数组名（ParaView: Select Input Scalars）。为空时自动取第一个点属性。
     void SetScalarsArrayName(const std::string& name);
@@ -50,8 +50,8 @@ public:
     bool Execute() override;
 
 protected:
-    WarpByScalarFilter();
-    ~WarpByScalarFilter() override = default;
+    WarpByScalar();
+    ~WarpByScalar() override = default;
 
 private:
     std::string m_ScalarsArrayName{};

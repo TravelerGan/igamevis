@@ -10,33 +10,33 @@
 
 IGAME_NAMESPACE_BEGIN
 
-WarpByScalarFilter::WarpByScalarFilter() {
+WarpByScalar::WarpByScalar() {
     SetNumberOfInputs(1);
     SetNumberOfOutputs(1);
 }
 
-void WarpByScalarFilter::SetScalarsArrayName(const std::string& name) {
+void WarpByScalar::SetScalarsArrayName(const std::string& name) {
     if (m_ScalarsArrayName != name) {
         m_ScalarsArrayName = name;
         this->Modified();
     }
 }
 
-void WarpByScalarFilter::SetScaleFactor(double scale) {
+void WarpByScalar::SetScaleFactor(double scale) {
     if (m_ScaleFactor != scale) {
         m_ScaleFactor = scale;
         this->Modified();
     }
 }
 
-void WarpByScalarFilter::SetUseNormal(bool use) {
+void WarpByScalar::SetUseNormal(bool use) {
     if (m_UseNormal != use) {
         m_UseNormal = use;
         this->Modified();
     }
 }
 
-void WarpByScalarFilter::SetNormal(double nx, double ny, double nz) {
+void WarpByScalar::SetNormal(double nx, double ny, double nz) {
     if (m_Normal[0] != nx || m_Normal[1] != ny || m_Normal[2] != nz) {
         m_Normal[0] = nx;
         m_Normal[1] = ny;
@@ -45,14 +45,14 @@ void WarpByScalarFilter::SetNormal(double nx, double ny, double nz) {
     }
 }
 
-void WarpByScalarFilter::SetXYPlane(bool xyPlane) {
+void WarpByScalar::SetXYPlane(bool xyPlane) {
     if (m_XYPlane != xyPlane) {
         m_XYPlane = xyPlane;
         this->Modified();
     }
 }
 
-bool WarpByScalarFilter::Execute() {
+bool WarpByScalar::Execute() {
     IGAME_CORE_INFO("WarpByScalarFilter: Execute() start (array = '{}', scale = {}, useNormal = {}, xyPlane = {})",
                     m_ScalarsArrayName, m_ScaleFactor, m_UseNormal, m_XYPlane);
 

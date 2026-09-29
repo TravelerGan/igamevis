@@ -57,8 +57,8 @@ else ()
     add_custom_target(iGameDeployExampleRuntime)
 endif ()
 
-# ��������� iGameCore ʱһ�£����� Scene �����Ͳ��ֲ�ͬ���� GL_SUPPORT_MSAA����
-# Scene::New ����������ֱ�Ӷ��𻵱��������� ${IGAMEVIS_CORE_LIB_TARGETS} �����Զ�������Щ�ꡣ
+#           iGameCore ʱһ £      Scene      Ͳ  ֲ ͬ     GL_SUPPORT_MSAA    
+# Scene::New           ֱ Ӷ  𻵱          ${IGAMEVIS_CORE_LIB_TARGETS}      Զ       Щ ꡣ
 add_compile_definitions(
     IGAME_PLATFORM_WINDOWS
     $<$<PLATFORM_ID:Windows>:PLATFORM_WINDOWS>
@@ -332,7 +332,7 @@ igame_add_example(testAnsysRTHReader IO/AnsysRTHReader.cpp)
 # Animation / Filters
 igame_add_example(testVolumeOfRevolution Filter/VolumeOfRevolution/TestVolumeOfRevolution.cpp)
 igame_add_example(testPassArray Filter/PassArrays/TestPassArrays.cpp)
-
+igame_add_example(testWarpByScalar Filter/WarpByScalar/TestWarpByScalar.cpp)
 igame_add_example(testAnimation Animation/TestAnimation.cpp)
 
 if (FFMPEG_FOUND)
@@ -377,7 +377,7 @@ igame_add_example(testCleanToGridFilter Filter/TestCleanToGridFilter.cpp)
 # Probe
 igame_add_example(testProbe Filter/Probe/TestProbe.cpp)
 
-# ������ #5 + �е����� #28 ���ײ�������
+#        #5 +  е      #28    ײ       
 igame_add_example(testCountCellVertices Filter/TestCountCellVertices.cpp)
 igame_add_example(testExtractEdges Filter/TestExtractEdges.cpp)
 

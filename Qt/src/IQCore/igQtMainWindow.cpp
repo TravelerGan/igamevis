@@ -5780,7 +5780,7 @@ void igQtMainWindow::initAllFilters() {
                 const bool useNormal = dialog->getChecked(useNormalId, ok);
                 const bool xyPlane = dialog->getChecked(xyPlaneId, ok);
 
-                auto filter = WarpByScalarFilter::New();
+                auto filter = WarpByScalar::New();
                 filter->SetScalarsArrayName(arrays[static_cast<size_t>(choice)].name.toStdString());
                 filter->SetScaleFactor(scale);
                 filter->SetUseNormal(useNormal);

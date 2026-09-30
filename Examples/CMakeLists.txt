@@ -57,8 +57,8 @@ else ()
     add_custom_target(iGameDeployExampleRuntime)
 endif ()
 
-# ±ØĞëÓë±àÒë iGameCore Ê±Ò»ÖÂ£¬·ñÔò Scene µÈÀàĞÍ²¼¾Ö²»Í¬£¨Èç GL_SUPPORT_MSAA£©£¬
-# Scene::New »áÔÚÔËĞĞÆÚÖ±½Ó¶ÑËğ»µ±ÀÀ£¡£ÂãÁ´ ${IGAMEVIS_CORE_LIB_TARGETS} ²»»á×Ô¶¯´øÉÏÕâĞ©ºê¡£
+#           iGameCore Ê±Ò» Â£      Scene      Í²  Ö² Í¬     GL_SUPPORT_MSAA    
+# Scene::New           Ö± Ó¶  ğ»µ±          ${IGAMEVIS_CORE_LIB_TARGETS}      Ô¶       Ğ© ê¡£
 add_compile_definitions(
     IGAME_PLATFORM_WINDOWS
     $<$<PLATFORM_ID:Windows>:PLATFORM_WINDOWS>
@@ -328,6 +328,7 @@ igame_add_example(testAnsysRTHReader IO/AnsysRTHReader.cpp)
 # Animation / Filters
 igame_add_example(testVolumeOfRevolution Filter/VolumeOfRevolution/TestVolumeOfRevolution.cpp)
 igame_add_example(testPassArray Filter/PassArrays/TestPassArrays.cpp)
+igame_add_example(testAppendAttributes Filter/AppendAttributes/TestAppendAttributes.cpp)
 
 igame_add_example(testAnimation Animation/TestAnimation.cpp)
 
@@ -371,7 +372,7 @@ igame_add_example(testBoundaryMeshQuality Filter/TestBoundaryMeshQuality.cpp)
 # Probe
 igame_add_example(testProbe Filter/Probe/TestProbe.cpp)
 
-# ¼òµ¥ÈÎÎñ #5 + ÖĞµÈÈÎÎñ #28 ÅäÌ×²âÊÔÓÃÀı
+#        #5 +  Ğµ      #28    ×²       
 igame_add_example(testCountCellVertices Filter/TestCountCellVertices.cpp)
 igame_add_example(testExtractEdges Filter/TestExtractEdges.cpp)
 

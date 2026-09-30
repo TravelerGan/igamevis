@@ -19,10 +19,10 @@ IGAME_NAMESPACE_BEGIN
  * 与 ParaView 一致，可以通过 SetAppendPointData / SetAppendCellData 选择要
  * 追加哪些关联（对应 vtkAppendAttributes 的 FieldAssociations）。
  */
-class AppendAttributesFilter : public Filter {
+class AppendAttributes : public Filter {
 public:
-    I_OBJECT(AppendAttributesFilter);
-    static Pointer New() { return new AppendAttributesFilter; }
+    I_OBJECT(AppendAttributes);
+    static Pointer New() { return new AppendAttributes; }
 
     /// 追加一个输入（与 AppendReduceFilter 相同的多输入管理方式）。
     void AddInput(DataObject::Pointer data);
@@ -41,8 +41,8 @@ public:
     bool Execute() override;
 
 protected:
-    AppendAttributesFilter();
-    ~AppendAttributesFilter() override = default;
+    AppendAttributes();
+    ~AppendAttributes() override = default;
 
 private:
     /// 递归收集输入（展平复合数据对象 / DrawObject 包装）。

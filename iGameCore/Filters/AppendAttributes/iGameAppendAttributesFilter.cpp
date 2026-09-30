@@ -19,12 +19,12 @@
 
 IGAME_NAMESPACE_BEGIN
 
-AppendAttributesFilter::AppendAttributesFilter() {
+AppendAttributes::AppendAttributes() {
     SetNumberOfInputs(1);
     SetNumberOfOutputs(1);
 }
 
-void AppendAttributesFilter::AddInput(DataObject::Pointer data) {
+void AppendAttributes::AddInput(DataObject::Pointer data) {
     int n = this->GetNumberOfInputs();
     if (n == 1 && this->GetInput(0) == nullptr) {
         this->SetInput(0, data);
@@ -34,21 +34,21 @@ void AppendAttributesFilter::AddInput(DataObject::Pointer data) {
     }
 }
 
-void AppendAttributesFilter::SetAppendPointData(bool enable) {
+void AppendAttributes::SetAppendPointData(bool enable) {
     if (m_AppendPointData != enable) {
         m_AppendPointData = enable;
         this->Modified();
     }
 }
 
-void AppendAttributesFilter::SetAppendCellData(bool enable) {
+void AppendAttributes::SetAppendCellData(bool enable) {
     if (m_AppendCellData != enable) {
         m_AppendCellData = enable;
         this->Modified();
     }
 }
 
-void AppendAttributesFilter::CollectInputs(DataObject::Pointer obj, std::vector<DataObject::Pointer>& out) {
+void AppendAttributes::CollectInputs(DataObject::Pointer obj, std::vector<DataObject::Pointer>& out) {
     if (!obj) { return; }
 
     switch (obj->GetDataObjectType()) {
@@ -83,7 +83,7 @@ void AppendAttributesFilter::CollectInputs(DataObject::Pointer obj, std::vector<
     }
 }
 
-IGsize AppendAttributesFilter::GetCellCount(DataObject::Pointer obj) {
+IGsize AppendAttributes::GetCellCount(DataObject::Pointer obj) {
     if (!obj) { return 0; }
 
     switch (obj->GetDataObjectType()) {
@@ -135,7 +135,7 @@ CellArray::Pointer CloneCellArray(CellArray::Pointer src) {
 
 } // namespace
 
-DataObject::Pointer AppendAttributesFilter::CreateOutputGeometry(DataObject::Pointer src) {
+DataObject::Pointer AppendAttributes::CreateOutputGeometry(DataObject::Pointer src) {
     if (!src) { return nullptr; }
 
     const IGenum type = src->GetDataObjectType();
@@ -235,7 +235,7 @@ DataObject::Pointer AppendAttributesFilter::CreateOutputGeometry(DataObject::Poi
     return output;
 }
 
-void AppendAttributesFilter::MergeAttributes(const std::vector<DataObject::Pointer>& inputs,
+void AppendAttributes::MergeAttributes(const std::vector<DataObject::Pointer>& inputs,
                                              AttributeSet::Pointer outAttrSet) {
     if (!outAttrSet) { return; }
 
@@ -269,7 +269,7 @@ void AppendAttributesFilter::MergeAttributes(const std::vector<DataObject::Point
     }
 }
 
-bool AppendAttributesFilter::Execute() {
+bool AppendAttributes::Execute() {
     std::vector<DataObject::Pointer> inputs;
     const int inputCount = this->GetNumberOfInputs();
     for (int i = 0; i < inputCount; ++i) {

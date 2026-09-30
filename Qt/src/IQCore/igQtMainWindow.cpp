@@ -5472,7 +5472,7 @@ void igQtMainWindow::initAllFilters() {
                     return;
                 }
 
-                auto filter = AppendAttributesFilter::New();
+                auto filter = AppendAttributes::New();
                 for (const auto& obj: selected) { filter->AddInput(obj); }
                 filter->SetAppendPointData(pointCb->isChecked());
                 filter->SetAppendCellData(cellCb->isChecked());

@@ -43,6 +43,7 @@
 #include "FeatureExtraction/iGameFeatureEdgesFilter.h"
 #include "Selection/iGameExtractCellsByRegionFilter.h"
 #include "MyFilter/iGameExtractCellsByTypeFilter.h"
+#include "ReverseSense/iGameReverseSenseFilter.h"
 
 #include "Convert/iGameConvertToPointCloudFilter.h"
 #include "Convert/iGameConvertToPointDataFilter.h"
@@ -6058,6 +6059,69 @@ void igQtMainWindow::initAllFilters() {
             });
 
 
+
+    // 反转面朝向 (Reverse Sense)。
+    connect(ui->menu_filters->addAction(QStringLiteral("反转面朝向 (Reverse Sense)")),
+            &QAction::triggered, this, [this](bool) {
+                auto scene = rendererWidget ? rendererWidget->GetScene() : nullptr;
+                auto currentModel = scene ? scene->GetCurrentModel() : nullptr;
+                if (!currentModel) {
+                    showDarkFramelessMessage(QStringLiteral("反转面朝向"), QStringLiteral("请先选择一个模型。"));
+                    return;
+                }
+                auto object = currentModel->GetDataObject();
+                if (iGame::DynamicCast<iGame::SurfaceMesh>(object).IsNull()) {
+                    showDarkFramelessMessage(QStringLiteral("反转面朝向"),
+                                             QStringLiteral("当前模型不是曲面网格（SurfaceMesh）"));
+                    return;
+                }
+
+                auto* dialog = new igQtFilterDialogDockWidget(this, true);
+                dialog->setFilterTitle(QStringLiteral("反转面朝向"));
+                dialog->setFilterDescription(QStringLiteral("反转面的顶点环序，并可取反法向"));
+                const int cellsId = dialog->addParameter(
+                        igQtFilterDialogDockWidget::QT_CHECK_BOX, QStringLiteral("反转面顺序"), "true");
+                const int normalsId = dialog->addParameter(
+                        igQtFilterDialogDockWidget::QT_CHECK_BOX, QStringLiteral("反转法向"), "true");
+                // 紧凑布局，避免过宽需要横向滚动。
+                dialog->setFixedWidth(340);
+                dialog->setParameterColumnStretch(0, 1);
+                if (auto* scrollArea = dialog->findChild<QScrollArea*>(QStringLiteral("scrollArea"))) {
+                    scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+                }
+                dialog->show();
+
+                dialog->setApplyFunctor([=, this]() {
+                    bool ok = false;
+                    auto filter = iGame::ReverseSenseFilter::New();
+                    filter->SetReverseCells(dialog->getChecked(cellsId, ok));
+                    filter->SetReverseNormals(dialog->getChecked(normalsId, ok));
+                    filter->SetInput(object);
+                    if (!filter->Execute()) {
+                        showDarkFramelessMessage(
+                                QStringLiteral("反转面朝向"),
+                                QStringLiteral("执行失败：%1").arg(QString::fromStdString(filter->GetMessage())));
+                        return;
+                    }
+                    auto output = filter->GetOutput();
+                    if (!output) {
+                        showDarkFramelessMessage(QStringLiteral("反转面朝向"), QStringLiteral("输出对象为空"));
+                        return;
+                    }
+                    output->SetName(object->GetName() + "_Reversed");
+
+                    auto inputDraw = iGame::DynamicCast<iGame::DrawObject>(object);
+                    auto outDraw = iGame::DynamicCast<iGame::DrawObject>(output);
+                    if (inputDraw && outDraw) {
+                        outDraw->SetViewStyle(static_cast<IGenum>(inputDraw->GetViewStyle()));
+                    }
+
+                    modelTreeWidget->addDataObjectToModelTree(output, ItemSource::Algorithm);
+                    modelTreeWidget->updateCloudPicture();
+                    rendererWidget->update();
+                    dialog->close();
+                });
+            });
 
     QAction* ResampleToLineAct1 = ui->menu_filters->addAction(QStringLiteral("重采样至直线(ResampleToLine)"));
 

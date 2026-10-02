@@ -73,3 +73,4 @@
 #include "PointLineInterpolator/iGamePointLineInterpolatorFilter.h"
 
 #include "AppendReduce/iGameAppendReduceFilter.h"
+#include "ReverseSense/iGameReverseSenseFilter.h"

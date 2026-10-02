@@ -114,17 +114,7 @@ IGsize AppendAttributes::GetCellCount(DataObject::Pointer obj) {
 
 namespace {
 
-/**
- * @brief 深拷贝一个 CellArray（单元连接数组）。
- *
- * 【踩坑记录】不能直接 `dst = CellArray::New(); dst->DeepCopy(src);`：
- * CellArray 构造函数会预置 m_Offsets = {0}，而 CellArray::DeepCopy 对 m_Offsets
- * 是追加式拷贝、不会先清空，结果偏移量数组多出一个开头的 0，所有单元的起始偏移
- * 与长度整体错位一格（第 0 个单元长度为 0，最后一个单元越界读取），下游按单元
- * 遍历时会读到错位索引 → 0xc0000005 / 0xc0000374 闪退。
- * 先 Reset() 再 DeepCopy 即可得到与源完全一致的连接数组。
- * （只有 CellArray 如此；Points / AttributeSet / FlatArray 的 DeepCopy 会先重建目标。）
- */
+
 CellArray::Pointer CloneCellArray(CellArray::Pointer src) {
     if (src == nullptr) { return nullptr; }
     auto dst = CellArray::New();
@@ -214,10 +204,6 @@ DataObject::Pointer AppendAttributes::CreateOutputGeometry(DataObject::Pointer s
             igIndex newDims[3] = {dims[0], dims[1], dims[2]};
             outMesh->SetDimensionSize(newDims);
         }
-        // 【必须】不要调用 SetExtent()：它的实现是 std::copy(e, e + 6, this->size)，
-        // 会把 6 个值写进只有 3 个元素的 size[]。extent 在整套代码里从未被赋值
-        // （恒为 {0,0,0,0,0,0}），调用 SetExtent 会把输出的 size 清零成 {0,0,0}，
-        // 而点/属性仍是完整的 N 个，后续按 size 建单元时越界读写 → 闪退。
         auto inPoints = inMesh->GetPoints();
         if (inPoints) {
             auto newPoints = Points::New();
@@ -239,7 +225,6 @@ void AppendAttributes::MergeAttributes(const std::vector<DataObject::Pointer>& i
                                              AttributeSet::Pointer outAttrSet) {
     if (!outAttrSet) { return; }
 
-    // 同名 + 同类（点/单元归属）的数组只保留最先出现的那一份，与 vtkAppendAttributes 一致
     std::set<std::pair<IGenum, std::string>> existing;
 
     for (const auto& input: inputs) {
@@ -290,7 +275,6 @@ bool AppendAttributes::Execute() {
         return false;
     }
 
-    // ---- 校验所有输入的点数 / 单元数逐项对应（与 vtkAppendAttributes 的要求一致） ----
     auto firstPoints = inputs[0]->GetPoints();
     const IGsize numPoints = firstPoints ? firstPoints->GetNumberOfPoints() : IGsize(0);
     const IGsize numCells = GetCellCount(inputs[0]);

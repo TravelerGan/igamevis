@@ -5645,69 +5645,6 @@ void igQtMainWindow::initAllFilters() {
         });
     });
 
-    auto resolveWarpInput = [this](DataObject::Pointer& obj, const QString& title) -> bool {
-        obj = nullptr;
-        auto scene = rendererWidget->GetScene();
-        if (scene == nullptr || scene->GetCurrentModel() == nullptr) {
-            showDarkFramelessMessage(title, QStringLiteral("请先在模型树中选择一个模型。"));
-            return false;
-        }
-        obj = scene->GetCurrentModel()->GetDataObject();
-        if (!obj) {
-            showDarkFramelessMessage(title, QStringLiteral("当前模型没有可用的数据对象。"));
-            return false;
-        }
-        const IGenum type = obj->GetDataObjectType();
-        if (type != IG_POINT_SET && type != IG_SURFACE_MESH && type != IG_VOLUME_MESH &&
-            type != IG_UNSTRUCTURED_MESH && type != IG_STRUCTURED_MESH) {
-            showDarkFramelessMessage(
-                    title, QStringLiteral("该算法只支持点集 / 表面网格 / 体网格 / 非结构网格 / 结构网格。"));
-            return false;
-        }
-        return true;
-    };
-
-    struct WarpArrayInfo {
-        QString name;
-        int dimension{1};
-        QString typeName;
-    };
-    auto collectPointArrays = [](DataObject::Pointer obj, std::vector<WarpArrayInfo>& out) {
-        auto attrSet = obj->GetAttributeSet();
-        if (!attrSet) { return; }
-        auto attrs = attrSet->GetAllPointAttributes();
-        if (!attrs) { return; }
-        for (IGsize i = 0; i < attrs->GetNumberOfElements(); ++i) {
-            auto& attr = attrs->GetElement(i);
-            if (attr.IsNone() || !attr.pointer) { continue; }
-            WarpArrayInfo info;
-            info.name = QString::fromStdString(attr.pointer->GetName());
-            info.dimension = attr.pointer->GetDimension();
-            switch (attr.type) {
-                case IG_SCALAR:
-                    info.typeName = QStringLiteral("标量");
-                    break;
-                case IG_VECTOR:
-                    info.typeName = QStringLiteral("向量");
-                    break;
-                case IG_NORMAL:
-                    info.typeName = QStringLiteral("法向");
-                    break;
-                case IG_TCOORD:
-                    info.typeName = QStringLiteral("纹理坐标");
-                    break;
-                case IG_TENSOR:
-                    info.typeName = QStringLiteral("张量");
-                    break;
-                default:
-                    info.typeName = QStringLiteral("属性");
-                    break;
-            }
-            out.push_back(info);
-        }
-    };
-
-    
 
     // ---------- 追加属性 (Append Attributes) ----------
     QAction* appendAttributesAction =

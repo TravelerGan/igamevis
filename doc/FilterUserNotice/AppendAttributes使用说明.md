@@ -178,7 +178,6 @@ cd <build-dir>
 
 1. **点数 / 单元数必须逐项对应**：这是本过滤器的核心前提（与 `vtkAppendAttributes` 一致）。任一输入与输入 #0 不一致时执行失败并报错，例如：
    `input #1 has 100 points / 20 cells while input #0 has 363 points / 200 cells; they must match one-to-one.`
-   本过滤器只搬运属性、不做任何几何拼接；若需要按几何合并网格，请使用网格合并类过滤器。
 
 2. **几何一律取自输入 #0**：输出的点坐标、单元连接与网格类型都来自第一个输入。当后续输入的数据类型与输入 #0 不同时只给出警告，仍按输入 #0 的类型输出，因此属性的挂接方式可能与来源模型不同。
 
@@ -191,9 +190,3 @@ cd <build-dir>
 6. **不修改原模型**：属性以深拷贝方式写入输出的新 `AttributeSet`，原始输入对象的属性保持不变。只有 `IG_POINT` / `IG_CELL` 两类关联的数组会被复制，其他归属的属性会被忽略。
 
 7. **数据类型限制**：仅支持 `PointSet` / `SurfaceMesh` / `VolumeMesh` / `UnstructuredMesh` / `StructuredMesh`（含 `DrawObject` 包装与复合数据的展平）。结构网格输出会补齐单元连接关系；其它数据类型会报 `unsupported data object type` 并执行失败。
-
-## 8. 相关 Filter
-
-- `AppendReduceFilter`：网格合并（拼接几何并去重），与本过滤器职责不同
-- `MergeVectorComponents`：把多个标量数组合并为一个向量数组（单输入）
-- `ExtractComponent`：从多分量数组中提取单个分量

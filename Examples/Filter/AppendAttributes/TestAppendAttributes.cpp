@@ -128,17 +128,4 @@ int main() {
         std::cout << "AttributeSet is null.\n";
     }
     std::cin.get();
-    // Set up the render window
-    // iGame::RenderWindow::Pointer window = iGame::RenderWindow::New();
-    // window->SetSize(1920, 1080);
-    // window->SetScene(scene);
-
-    // // Set up the interactor
-    // auto interactor = iGame::Interactor::New();
-    // interactor->Initialize(scene);
-    // interactor->CreateDefaultStyle();
-    // window->SetInteractor(interactor);
-
-    // // Start the render loop
-    // window->Show();
 }

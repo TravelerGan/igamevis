@@ -5806,7 +5806,7 @@ void igQtMainWindow::initAllFilters() {
 
         QLabel* tip = new QLabel(
                 QStringLiteral("选择要合并属性的数据对象（列表顺序即输入顺序，第一个提供输出几何与数据类型）。\n"
-                                "要求所选对象的点数和单元数逐项对应；同名的属性只保留最先出现的那一份。"),
+                                "要求所选对象的点数和单元数逐项对应；同名的属性会全部保留，"),
                 content);
         tip->setWordWrap(true);
         mainLayout->addWidget(tip);

@@ -12,6 +12,7 @@
 #include "iGameUnstructuredMesh.h"
 #include "iGameVolumeMesh.h"
 
+#include <map>
 #include <set>
 #include <string>
 #include <utility>
@@ -225,30 +226,84 @@ void AppendAttributes::MergeAttributes(const std::vector<DataObject::Pointer>& i
                                              AttributeSet::Pointer outAttrSet) {
     if (!outAttrSet) { return; }
 
-    std::set<std::pair<IGenum, std::string>> existing;
+    using AttributeKey = std::pair<IGenum, std::string>;
+    auto makeKey = [](IGenum attachmentType, const std::string& name) {
+        return AttributeKey{attachmentType, name};
+    };
 
-    for (const auto& input: inputs) {
-        if (!input) { continue; }
-        auto srcSet = input->GetAttributeSet();
+    const bool appendPointData = m_AppendPointData;
+    const bool appendCellData = m_AppendCellData;
+    auto isAppendable = [appendPointData, appendCellData](const AttributeSet::Attribute& attr) {
+        if (attr.IsNone() || !attr.pointer) { return false; }
+        if (attr.attachmentType != IG_POINT && attr.attachmentType != IG_CELL) { return false; }
+        if (attr.attachmentType == IG_POINT && !appendPointData) { return false; }
+        if (attr.attachmentType == IG_CELL && !appendCellData) { return false; }
+        return true;
+    };
+
+    // 第一遍：记录每个「归属 + 原名」最后出现在哪个输入上，该输入留用原名。
+    std::map<AttributeKey, size_t> lastInputOfName;
+    for (size_t inputIndex = 0; inputIndex < inputs.size(); ++inputIndex) {
+        if (!inputs[inputIndex]) { continue; }
+        auto srcSet = inputs[inputIndex]->GetAttributeSet();
         if (!srcSet) { continue; }
         auto buffer = srcSet->GetAllAttributes();
         if (!buffer) { continue; }
 
         for (IGsize i = 0; i < buffer->GetNumberOfElements(); ++i) {
             auto& src = buffer->GetElement(i);
-            if (src.IsNone() || !src.pointer) { continue; }
-            if (src.attachmentType != IG_POINT && src.attachmentType != IG_CELL) { continue; }
-            if (src.attachmentType == IG_POINT && !m_AppendPointData) { continue; }
-            if (src.attachmentType == IG_CELL && !m_AppendCellData) { continue; }
+            if (!isAppendable(src)) { continue; }
+            lastInputOfName[makeKey(src.attachmentType, src.pointer->GetName())] = inputIndex;
+        }
+    }
 
-            const std::pair<IGenum, std::string> key{src.attachmentType, src.pointer->GetName()};
-            if (!existing.insert(key).second) { continue; }
+    // 第二遍：按输入顺序复制，非最后一份的同名属性加 "_input_<模型序号>" 后缀。
+    std::set<AttributeKey> used;
+    for (size_t inputIndex = 0; inputIndex < inputs.size(); ++inputIndex) {
+        if (!inputs[inputIndex]) { continue; }
+        auto srcSet = inputs[inputIndex]->GetAttributeSet();
+        if (!srcSet) { continue; }
+        auto buffer = srcSet->GetAllAttributes();
+        if (!buffer) { continue; }
+
+        for (IGsize i = 0; i < buffer->GetNumberOfElements(); ++i) {
+            auto& src = buffer->GetElement(i);
+            if (!isAppendable(src)) { continue; }
 
             AttributeSet::Attribute copy;
             if (!copy.DeepCopy(src)) {
                 IGAME_CORE_WARN("AppendAttributesFilter: failed to copy array '{}'.", src.pointer->GetName());
                 continue;
             }
+
+            const std::string srcName = copy.pointer->GetName();
+            const auto key = makeKey(copy.attachmentType, srcName);
+            const auto it = lastInputOfName.find(key);
+            const bool keepOriginalName = (it == lastInputOfName.end() || it->second == inputIndex);
+
+            std::string outName = srcName;
+            if (!keepOriginalName) {
+                outName = srcName + "_input_" + std::to_string(inputIndex + 1);
+            }
+
+            std::string uniqueName = outName;
+            int extraSuffix = 0;
+            while (!used.insert(makeKey(copy.attachmentType, uniqueName)).second) {
+                ++extraSuffix;
+                uniqueName = outName + "_" + std::to_string(extraSuffix);
+            }
+            copy.pointer->SetName(uniqueName);
+
+            if (extraSuffix > 0) {
+                IGAME_CORE_WARN("AppendAttributesFilter: output array name '{}' is already taken; '{}' from "
+                                "input #{} was stored as '{}'.",
+                                outName, srcName, inputIndex, uniqueName);
+            } else if (!keepOriginalName) {
+                IGAME_CORE_INFO("AppendAttributesFilter: renamed duplicate attribute '{}' from input #{} to '{}'; "
+                                "input #{} keeps the original name.",
+                                srcName, inputIndex, uniqueName, it->second);
+            }
+
             outAttrSet->AddAttribute(copy.type, copy.attachmentType, copy.pointer, copy.dataRange);
         }
     }

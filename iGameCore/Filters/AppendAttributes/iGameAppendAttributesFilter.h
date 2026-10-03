@@ -44,6 +44,7 @@ private:
     static DataObject::Pointer CreateOutputGeometry(DataObject::Pointer src);
 
     /// 合并属性：把每个输入里的点/单元属性依次复制进 outAttrSet。
+    /// 同名（且同归属）属性全部保留，靠后的输入留用原名，靠前的改名为 "<原名>_input_<模型序号>"。
     void MergeAttributes(const std::vector<DataObject::Pointer>& inputs, AttributeSet::Pointer outAttrSet);
 
     bool m_AppendPointData{true};

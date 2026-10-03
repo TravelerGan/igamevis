@@ -10,7 +10,7 @@
 
 - 输出几何（点坐标、单元连接关系、网格类型）完全取自输入 #0
 - 点属性、单元属性可分别开关，对应 ParaView 的 Field Associations
-- 同名 + 同类（名称相同且归属同为点或同为单元）的数组只保留**最先出现**的那一份，与 `vtkAppendAttributes` 行为一致
+- 同名 + 同类（名称相同且归属同为点或同为单元）的数组**全部保留**，但一个配对里只有一份能留用原名：靠后的输入保留原名，靠前的输入依次改名为 `<原名>_input_<模型序号>`（序号从 1 开始），与 ParaView 的 Append Attributes 观感一致
 - 属性深拷贝进输出，原输入模型不被修改；输出为**独立新节点**
 - 输出节点命名：`<输入#0 名称>_appended`
 
@@ -104,7 +104,7 @@ int main() {
     auto result = filter->GetOutput();
     scene->AddModel(result);   // 输出节点名：append_grid_a_appended
 
-    // 查看合并后的属性（按名称 + 归属去重）
+    // 查看合并后的属性（同名属性全部保留，靠前的输入带 _input_N 后缀）
     auto attrSet = result->GetAttributeSet();
     auto pointAttrs = attrSet->GetAllPointAttributes();
     for (IGsize i = 0; i < pointAttrs->GetNumberOfElements(); ++i) {
@@ -125,7 +125,9 @@ int main() {
 | `append_grid_a.vtk` | `pressureA`、`shared` | `matA` |
 | `append_grid_b.vtk` | `temperatureB`、`shared` | `matB` |
 
-合并后输出包含点属性 `pressureA`、`shared`、`temperatureB` 与单元属性 `matA`、`matB`。两个输入中的同名 `shared` 只保留输入 #0（`append_grid_a.vtk`）的那一份。
+合并后输出包含点属性 `pressureA`、`shared_input_1`、`temperatureB` 与单元属性 `matA`、`matB`。
+
+两个输入都带同名点属性 `shared`：按 ParaView 的约定，第二个输入（`append_grid_b.vtk`）保留原名 `shared`，第一个输入（`append_grid_a.vtk`）的那一份改名为 `shared_input_1`（后缀里的 `1` 是模型序号，从 1 开始）。
 
 ### 示例 2：只合并点属性
 
@@ -180,7 +182,7 @@ cd <build-dir>
 
 2. **几何一律取自输入 #0**：输出的点坐标、单元连接与网格类型都来自第一个输入。当后续输入的数据类型与输入 #0 不同时只给出警告，仍按输入 #0 的类型输出，因此属性的挂接方式可能与来源模型不同。
 
-3. **同名同类属性去重**：按「名称 + 归属（点 / 单元）」判重，只保留**最先出现**的那一份，后面的同名数组会被静默跳过。想让某个输入的同名属性生效，请把它放在更靠前的位置。
+3. **同名同类属性改名保留**：按「名称 + 归属（点 / 单元）」配对，同名数组不再丢弃——每个配对里**最后出现**的输入留用原名，更靠前的输入依次改名为 `<原名>_input_<模型序号>`（模型序号从 1 开始，所以第一个输入的属性后缀是 `_input_1`）。两个输入时就是「第二个输入保留原名、第一个输入加 `_input_1`」；多个输入以此类推，例如三个输入的 `shared` 依次变成 `shared_input_1`、`shared_input_2`、`shared`。改名只作用于输出的副本，输入模型不受影响；若输入本身就叫 `<原名>_input_<序号>`，为避免输出重名会继续追加 `_1`、`_2` 等后缀，并在日志里给出警告。
 
 4. **两个开关不能同时关闭**：`SetAppendPointData(false)` 与 `SetAppendCellData(false)` 同时成立时执行失败并报错 `both point data and cell data are disabled!`；被关闭的关联上的属性不会出现在输出里。
 

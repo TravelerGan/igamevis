@@ -71,5 +71,6 @@
 #include "PassArrays/iGamePassArraysFilter.h"
 #include "ProcessGet/iGameGenerateProcessIdsFilter.h"
 #include "PointLineInterpolator/iGamePointLineInterpolatorFilter.h"
+#include "ExtractEnclosedPoints/iGameExtractEnclosedPointsFilter.h"
 
 #include "AppendReduce/iGameAppendReduceFilter.h"

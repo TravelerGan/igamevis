@@ -52,6 +52,7 @@
 
 #include "MyFilter/iGameCellCenterFilter.h"
 #include "MyFilter/iGameCleanToGridFilter.h"
+#include "ExtractEnclosedPoints/iGameExtractEnclosedPointsFilter.h"
 
 #include "Interactor/iGameInteractor.h"
 
@@ -2162,6 +2163,232 @@ void igQtMainWindow::initAllFilters() {
                     dialog->close();
                 });
             });
+
+    //封闭点提取 (Extract Enclosed Points)
+    QAction* extractEnclosedPoints =
+            ui->menu_filters->addAction(QStringLiteral("封闭点提取 (Extract Enclosed Points)"));
+    connect(extractEnclosedPoints, &QAction::triggered, this, [this](bool) {
+        auto scene = rendererWidget->GetScene();
+        if (!scene) return;
+
+        // ---- 收集 Surface 候选（SurfaceMesh 派生）----
+        std::vector<QString> surfaceNames;
+        std::vector<DataObject::Pointer> surfaceObjs;
+        // ---- 收集 Input 候选（所有 PointSet 派生）----
+        std::vector<QString> inputNames;
+        std::vector<DataObject::Pointer> inputObjs;
+
+        // Input 列表第一项固定是“手工构造”
+        inputNames.push_back(QStringLiteral("【手工构造随机点云】"));
+        inputObjs.push_back(nullptr);
+
+        for (auto it = scene->GetModelList()->Begin(); it != scene->GetModelList()->End(); ++it) {
+            auto m = it->second;
+            if (!m) continue;
+            auto obj = m->GetDataObject();
+            if (!obj) continue;
+
+            if (!DynamicCast<PointSet>(obj).IsNull()) {
+                inputNames.push_back(QString::fromStdString(obj->GetName()));
+                inputObjs.push_back(obj);
+            }
+            if (!DynamicCast<SurfaceMesh>(obj).IsNull() && DynamicCast<SurfaceMesh>(obj)->GetNumberOfFaces() > 0) {
+                surfaceNames.push_back(QString::fromStdString(obj->GetName()));
+                surfaceObjs.push_back(obj);
+            }
+        }
+
+        if (surfaceNames.empty()) {
+            showDarkFramelessMessage(QStringLiteral("封闭点提取"),
+                                     QStringLiteral("场景中没有可用的表面网格 (SurfaceMesh)。\n"
+                                                    "请先加载一个封闭表面模型，"
+                                                    "或先用“算法处理 → 数据处理 → 表面提取”生成表面网格。"));
+            return;
+        }
+
+        // 默认 Surface = 当前模型（若它是 SurfaceMesh）
+        int defaultSurfaceIdx = 0;
+        auto currentModel = scene->GetCurrentModel();
+        auto currentObj = currentModel ? currentModel->GetDataObject() : nullptr;
+        if (currentObj) {
+            for (size_t i = 0; i < surfaceObjs.size(); ++i) {
+                if (surfaceObjs[i] == currentObj) {
+                    defaultSurfaceIdx = (int) i;
+                    break;
+                }
+            }
+        }
+
+        // 第一个对话框：只含公共参数
+        auto* dialog = new igQtFilterDialogDockWidget(this, true);
+        dialog->setFilterTitle(QStringLiteral("封闭点提取 (Extract Enclosed Points)"));
+        dialog->setFilterDescription(QStringLiteral("判定一组点是否位于封闭表面内部，输出内部的点。\n"
+                                                    "• Input   ：待判定的点集（可选“手工构造随机点云”）\n"
+                                                    "• Surface ：封闭流形表面（必须是 SurfaceMesh）\n"
+                                                    "两个输入可以相同，也可以不同。"));
+
+        const int inputModelId = dialog->addParameter(igQtFilterDialogDockWidget::QT_COMBO_BOX,
+                                                      QStringLiteral("Input（待判定点集）"), inputNames);
+        const int surfaceModelId = dialog->addParameter(igQtFilterDialogDockWidget::QT_COMBO_BOX,
+                                                        QStringLiteral("Surface（封闭表面）"), surfaceNames);
+        const int checkClosedId = dialog->addParameter(igQtFilterDialogDockWidget::QT_CHECK_BOX,
+                                                       QStringLiteral("检查表面封闭性"), "true");
+        const int insideOutId = dialog->addParameter(igQtFilterDialogDockWidget::QT_CHECK_BOX,
+                                                     QStringLiteral("输出外部点 (InsideOut)"), "false");
+        const int toleranceId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                     QStringLiteral("容差 Tolerance"), "0.001");
+
+        if (auto* sc = qobject_cast<QComboBox*>(dialog->getWidget(surfaceModelId))) {
+            sc->setCurrentIndex(defaultSurfaceIdx);
+        }
+
+        dialog->show();
+
+        dialog->setApplyFunctor([=, this]() {
+            bool ok = false;
+            const int inIdx = dialog->getComboIndex(inputModelId, ok);
+            const int surIdx = dialog->getComboIndex(surfaceModelId, ok);
+            if (!ok || inIdx < 0 || inIdx >= (int) inputObjs.size() || surIdx < 0 ||
+                surIdx >= (int) surfaceObjs.size()) {
+                showDarkFramelessMessage(QStringLiteral("参数错误"), QStringLiteral("请选择有效的 Input 和 Surface。"));
+                return;
+            }
+            const bool checkClosed = dialog->getChecked(checkClosedId, ok);
+            const bool insideOut = dialog->getChecked(insideOutId, ok);
+            const double tol = dialog->getDouble(toleranceId, ok);
+            if (!ok || tol < 0.0) {
+                showDarkFramelessMessage(QStringLiteral("参数错误"), QStringLiteral("容差必须是非负数。"));
+                return;
+            }
+
+            auto surface = DynamicCast<SurfaceMesh>(surfaceObjs[surIdx]);
+            if (surface.IsNull() || surface->GetNumberOfFaces() == 0) {
+                showDarkFramelessMessage(QStringLiteral("参数错误"),
+                                         QStringLiteral("Surface 必须是带面片的表面网格。"));
+                return;
+            }
+
+            // 公共执行逻辑（手工/非手工都走这里）
+            auto runFilter = [this, surface, checkClosed, insideOut, tol](DataObject::Pointer finalInput) {
+                if (!finalInput) return;
+
+                auto filter = ExtractEnclosedPointsFilter::New();
+                filter->SetInput(0, finalInput);
+                filter->SetInput(1, surface);
+                filter->SetCheckSurface(checkClosed);
+                filter->SetInsideOut(insideOut);
+                filter->SetTolerance(tol);
+
+                if (!filter->Execute()) {
+                    showDarkFramelessMessage(QStringLiteral("执行失败"),
+                                             QStringLiteral("封闭点提取执行失败，请检查输入。"));
+                    return;
+                }
+                auto output = filter->GetOutput();
+                if (!output) {
+                    showDarkFramelessMessage(QStringLiteral("执行失败"), QStringLiteral("未产生有效输出。"));
+                    return;
+                }
+
+                auto inPS = DynamicCast<PointSet>(finalInput);
+                auto outPS = DynamicCast<PointSet>(output);
+                const IGsize inCount = inPS ? inPS->GetNumberOfPoints() : 0;
+                const IGsize outCount = outPS ? outPS->GetNumberOfPoints() : 0;
+
+                qDebug() << "[ExtractEnclosedPoints] 封闭点提取完成\n"
+                         << "  Input        :" << QString::fromStdString(finalInput->GetName()) << "\n"
+                         << "  Surface      :" << QString::fromStdString(surface->GetName()) << "\n"
+                         << "  InputPoints  :" << inCount << "\n"
+                         << "  OutputPoints :" << outCount << "\n"
+                         << "  InsideOut    :" << (insideOut ? "true" : "false") << "\n"
+                         << "  Tolerance    :" << tol << "\n"
+                         << "  CheckSurface :" << (checkClosed ? "true" : "false");
+
+                output->SetName(finalInput->GetName() + "_enclosed");
+                modelTreeWidget->addDataObjectToModelTree(output, Algorithm);
+
+                if (auto drawObj = DynamicCast<DrawObject>(output)) {
+                    drawObj->ConvertToDrawableData();
+                    drawObj->SetViewStyle(IG_POINTS);
+                    drawObj->SetPointSize(4.0f);
+                    drawObj->SetVisibility(true);
+                }
+
+                rendererWidget->update();
+            };
+
+            // 分支 1：非手工构造 → 直接执行 → 主对话框关闭
+            const bool isManual = (inputObjs[inIdx] == nullptr);
+            if (!isManual) {
+                runFilter(inputObjs[inIdx]);
+                dialog->deleteLater(); // 自动关闭 + 安全删除
+                return;
+            }
+
+            // 分支 2：手工构造 → 弹第二个对话框 → 两个都关闭
+            auto* manualDialog = new igQtFilterDialogDockWidget(this, true);
+            manualDialog->setFilterTitle(QStringLiteral("手工构造随机点云"));
+            manualDialog->setFilterDescription(
+                    QStringLiteral("在 Surface 包围盒的基础上，扩展一定倍数后均匀随机采样。\n"
+                                   "生成的随机点云会加入场景，便于与结果对比。"));
+
+            const int sampleCountId = manualDialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                                 QStringLiteral("采样点数"), "2000");
+            const int expandFactorId = manualDialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                                  QStringLiteral("包围盒扩展倍数"), "1.5");
+            const int addToSceneId = manualDialog->addParameter(igQtFilterDialogDockWidget::QT_CHECK_BOX,
+                                                                QStringLiteral("加入场景以对比"), "true");
+            const int seedId = manualDialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                          QStringLiteral("随机种子"), "42");
+
+            manualDialog->show();
+
+            manualDialog->setApplyFunctor([=, this]() {
+                bool ok2 = false;
+                const int sampleCount = manualDialog->getInt(sampleCountId, ok2);
+                const double expand = manualDialog->getDouble(expandFactorId, ok2);
+                const bool addToScene = manualDialog->getChecked(addToSceneId, ok2);
+                const int seed = manualDialog->getInt(seedId, ok2);
+                if (!ok2 || sampleCount <= 0 || expand <= 0.0) {
+                    showDarkFramelessMessage(QStringLiteral("参数错误"),
+                                             QStringLiteral("采样点数必须是正整数，扩展倍数必须是正数。"));
+                    return;
+                }
+
+                auto cloud = PointSet::New();
+                auto pts = cloud->GetPoints();
+                std::mt19937 rng(static_cast<unsigned int>(seed));
+                const auto& bbox = surface->GetBoundingBox();
+                const auto center = (bbox.min + bbox.max) * 0.5;
+                const auto half = (bbox.max - bbox.min) * (expand * 0.5);
+                std::uniform_real_distribution<float> rx(static_cast<float>(center[0] - half[0]),
+                                                         static_cast<float>(center[0] + half[0]));
+                std::uniform_real_distribution<float> ry(static_cast<float>(center[1] - half[1]),
+                                                         static_cast<float>(center[1] + half[1]));
+                std::uniform_real_distribution<float> rz(static_cast<float>(center[2] - half[2]),
+                                                         static_cast<float>(center[2] + half[2]));
+                pts->Reserve(sampleCount);
+                for (int i = 0; i < sampleCount; ++i) { pts->AddPoint(Point(rx(rng), ry(rng), rz(rng))); }
+                cloud->SetName("RandomCloud");
+
+                if (addToScene) {
+                    if (auto drawCloud = DynamicCast<DrawObject>(cloud)) {
+                        drawCloud->ConvertToDrawableData();
+                        drawCloud->SetViewStyle(IG_POINTS);
+                        drawCloud->SetPointSize(3.0f);
+                        drawCloud->SetVisibility(true);
+                    }
+                    modelTreeWidget->addDataObjectToModelTree(cloud, Algorithm);
+                }
+
+                runFilter(cloud);
+
+                // 两个对话框都关闭（deleteLater 安全）
+                manualDialog->deleteLater();
+                dialog->deleteLater();
+            });
+        });
+    });
 
 
     /* Feature Edges is intentionally a first-level item under 算法处理. */

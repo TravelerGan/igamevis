@@ -225,8 +225,20 @@ set(IGAME_BATCH1_EXAMPLES
     testOutlineCorners testProbe testConvertToVertex
 )
 
+set(_IGAME_MODEL_GEOMETRY_FIXTURE
+    "${CMAKE_SOURCE_DIR}/test/Animation Test/result-case1/VTKfile-0.vtk")
+
 function(igame_register_example_test EXAMPLE_TARGET)
     if (NOT TARGET ${EXAMPLE_TARGET})
+        return()
+    endif ()
+
+    if ("${EXAMPLE_TARGET}" STREQUAL "testRandomVectors" AND
+        NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Models/CellCenter_hexa_grid.vtk")
+        return()
+    endif ()
+    if ("${EXAMPLE_TARGET}" STREQUAL "testLosslessEncode" AND
+        NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Models/Quad_Plane_Tensor.vtk")
         return()
     endif ()
 
@@ -248,7 +260,8 @@ function(igame_register_example_test EXAMPLE_TARGET)
             COMMAND "$<TARGET_FILE:${EXAMPLE_TARGET}>" ${_BATCH1_ARGS}
             WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
         set_tests_properties(${EXAMPLE_TARGET} PROPERTIES TIMEOUT 180 LABELS "batch1-filters")
-        if ("${EXAMPLE_TARGET}" STREQUAL "testRandomVectors")
+        if ("${EXAMPLE_TARGET}" STREQUAL "testRandomVectors" AND
+            EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Models/CellCenter_surface_mixed.vtk")
             add_test(NAME testRandomVectorsMixedCells
                 COMMAND "$<TARGET_FILE:testRandomVectors>" Models/CellCenter_surface_mixed.vtk
                 WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
@@ -346,6 +359,10 @@ function(igame_register_example_test EXAMPLE_TARGET)
             # Shaders/fonts are deployed in the Examples build directory.
             set(_TEST_WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
         endif ()
+        if ("${EXAMPLE_TARGET}" STREQUAL "testModelGeometryParallelValidation" AND
+            NOT EXISTS "${_IGAME_MODEL_GEOMETRY_FIXTURE}")
+            list(APPEND _TEST_COMMAND -Arguments "--polyhedron-only")
+        endif ()
 
         add_test(
             NAME ${EXAMPLE_TARGET}
@@ -366,6 +383,10 @@ function(igame_register_example_test EXAMPLE_TARGET)
         "${EXAMPLE_TARGET}" STREQUAL "testZeroCellPointCloudValidation" OR
         "${EXAMPLE_TARGET}" STREQUAL "testAnimationExportRangeValidation")
         set(_VALIDATION_COMMAND "$<TARGET_FILE:${EXAMPLE_TARGET}>")
+        if ("${EXAMPLE_TARGET}" STREQUAL "testModelGeometryParallelValidation" AND
+            NOT EXISTS "${_IGAME_MODEL_GEOMETRY_FIXTURE}")
+            list(APPEND _VALIDATION_COMMAND --polyhedron-only)
+        endif ()
         if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
             "${EXAMPLE_TARGET}" STREQUAL "testAnimationExportRangeValidation")
             list(PREPEND _VALIDATION_COMMAND xvfb-run -a)
@@ -549,11 +570,13 @@ igame_add_example(testDeformationCode Filter/Deformation/TestStressDeformationFi
 igame_add_example(testContourLine Filter/TestContourLine.cpp)
 igame_add_example(testContourExtraction Filter/TestContourExtraction.cpp)
 igame_add_example(testModelGeometryParallelValidation Filter/ModelGeometryParallelValidation.cpp)
-add_custom_command(TARGET testModelGeometryParallelValidation POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-        "${CMAKE_SOURCE_DIR}/test/Animation Test/result-case1/VTKfile-0.vtk"
-        "$<TARGET_FILE_DIR:testModelGeometryParallelValidation>/VTKfile-0.vtk"
-)
+if (EXISTS "${_IGAME_MODEL_GEOMETRY_FIXTURE}")
+    add_custom_command(TARGET testModelGeometryParallelValidation POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${_IGAME_MODEL_GEOMETRY_FIXTURE}"
+            "$<TARGET_FILE_DIR:testModelGeometryParallelValidation>/VTKfile-0.vtk"
+    )
+endif ()
 
 # Color bar / interaction
 igame_add_example(testChangeColorRange ColorBar/ChangeColorRange.cpp)

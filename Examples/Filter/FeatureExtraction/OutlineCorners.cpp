@@ -1,3 +1,9 @@
+// Source: dayuwan77/igamevis at eccac729b57aeacbe9312d7d5189f6990bb4eebd.
+// Integration gap: e7ec6571 imported the filter but omitted its example.
+// Preserve the numerical/attribute checks below and reject invalid inputs;
+// visual examples support --no-render so CI requires a real exit status.
+// Integration commit: test: add examples for first-batch standard filters
+// Find it: git log --diff-filter=A --format="%h %s" -- Examples/Filter/FeatureExtraction/OutlineCorners.cpp
 #include "FeatureExtraction/iGameOutlineCornerFilter.h"
 #include "iGameFileIO.h"
 #include "iGamePointSet.h"
@@ -50,6 +56,11 @@ int main(int argc, char* argv[]) {
     if (result.IsNull()) {
         std::cerr << "OutlineCornerFilter returned no result.\n";
         return 5;
+    }
+    // Eight corners, each represented by a shared origin and three segments.
+    if (result->GetNumberOfPoints() != 32 || result->GetNumberOfCells() != 24) {
+        std::cerr << "Incorrect outline corner topology.\n";
+        return 6;
     }
 
     std::cout << "Input: " << inputFile << '\n';

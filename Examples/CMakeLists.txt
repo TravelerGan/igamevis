@@ -225,6 +225,11 @@ set(IGAME_BATCH1_EXAMPLES
     testOutlineCorners testProbe testConvertToVertex
 )
 
+# Regression: code-only checkouts omit LFS fixtures, so copying VTKfile-0.vtk
+# unconditionally failed both Windows and Linux CI builds. Keep the full model
+# checks when inputs exist; otherwise run synthetic polyhedron checks and omit
+# only tests whose required model inputs are absent.
+# Fix: 74a652a8 (Allow fixture-free example validation in code-only checkout).
 set(_IGAME_MODEL_GEOMETRY_FIXTURE
     "${CMAKE_SOURCE_DIR}/test/Animation Test/result-case1/VTKfile-0.vtk")
 

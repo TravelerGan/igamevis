@@ -7,7 +7,7 @@ IGAME_NAMESPACE_BEGIN
 
 /**
  * @class   iGameForceStaticMeshFilter
- * @brief  
+ * @brief
  *          Caches the input mesh the first time it executes and reuses it as
  *          a static mesh: only the attribute data (point/cell/field) is
  *          updated as long as the geometry dimensions (points/cells) stay the

@@ -223,6 +223,7 @@ set(IGAME_BATCH1_EXAMPLES
     testRemoveGhostInformation testElevation testMaskPoints
     testFeatureEdges testFeatureEdgesVisualization testExtractSubset
     testOutlineCorners testProbe testConvertToVertex
+    testExtractCellsByType
 )
 
 # Regression: code-only checkouts omit LFS fixtures, so copying VTKfile-0.vtk
@@ -258,7 +259,8 @@ function(igame_register_example_test EXAMPLE_TARGET)
         if ("${EXAMPLE_TARGET}" STREQUAL "testCellCenterFilter" OR
             "${EXAMPLE_TARGET}" STREQUAL "testFeatureEdgesVisualization" OR
             "${EXAMPLE_TARGET}" STREQUAL "testExtractSubset" OR
-            "${EXAMPLE_TARGET}" STREQUAL "testConvertToVertex")
+            "${EXAMPLE_TARGET}" STREQUAL "testConvertToVertex" OR
+            "${EXAMPLE_TARGET}" STREQUAL "testExtractCellsByType")
             list(APPEND _BATCH1_ARGS --no-render)
         endif ()
         add_test(NAME ${EXAMPLE_TARGET}
@@ -676,6 +678,7 @@ igame_add_example(testMeshTetrahedralize Filter/TestMeshTetrahedralize.cpp)
 # First-batch standard filter examples (Elevation is registered above).
 igame_add_example(testPointCoordinates Filter/PointCoordinates/TestPointCoordinates.cpp)
 igame_add_example(testCellCenterFilter Filter/CellCenter/TestCellCenterFilter.cpp)
+igame_add_example(testExtractCellsByType Filter/MyFilter/TestExtractCellsByType.cpp)
 igame_add_example(testRandomVectors Filter/AttributeManipulation/TestRandomVectors.cpp)
 igame_add_example(testRemoveGhostInformation Filter/RemoveGhostInformation/TestRemoveGhostInformation.cpp)
 igame_add_example(testMaskPoints Filter/MaskPoints/TestMaskPoints.cpp)

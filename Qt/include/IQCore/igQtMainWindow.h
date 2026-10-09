@@ -26,6 +26,14 @@
 
 class QMenu;
 class QHBoxLayout;
+class QComboBox;
+class QLabel;
+class QPushButton;
+class QFrame;
+
+namespace Ui {
+class MainWindow;
+}
 
 class igQtModelDrawWidget;
 class igQtFileLoader;

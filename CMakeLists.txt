@@ -17,9 +17,9 @@ endif ()
 
 # Add options that the user can set with the -D parameter
 # These options must NOT be forced so that command-line -D values work.
-option(ENABLE_CGNS_MODULE "Enable CGNS ThirdParty Module" ON)
+option(ENABLE_CGNS_MODULE "Enable CGNS ThirdParty Module" OFF)
 option(ENABLE_NASTRAN_MODULE "Enable Nastran Lib ThirdParty Module" OFF)
-set(ENABLE_LIBTORCH_MODULE "CPU" CACHE STRING "Libtorch ThirdParty Module: OFF / GPU / CPU")
+set(ENABLE_LIBTORCH_MODULE "OFF" CACHE STRING "Libtorch ThirdParty Module: OFF / GPU / CPU")
 set_property(CACHE ENABLE_LIBTORCH_MODULE PROPERTY STRINGS OFF GPU CPU)
 option(ENABLE_GPSCUDA_MODULE "Enable GPS CUDA Module." OFF)
 option(ENABLE_QT_MODULE "Build GUI/Qt Module." ON)
@@ -44,7 +44,7 @@ endif ()
 # Set Core Module install Option to ON
 #--------------------------------------------------------------------
 set(CORE_MODULE_INSTALL ON CACHE BOOL "Enable iGameVis Core Module to install as lib or not." FORCE)
-option(EXAMPLE_COMPILE "Enable iGameVis Core Module's Example Compilation." ON)
+option(EXAMPLE_COMPILE "Enable iGameVis Core Module's Example Compilation." OFF)
 set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/install" CACHE PATH "Install path prefix" FORCE)
 
 # 如果检测到 Anaconda 环境，尝试忽略其路径

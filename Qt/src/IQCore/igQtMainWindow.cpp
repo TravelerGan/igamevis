@@ -63,7 +63,7 @@
 #include "Convert/iGameConvertToVolumeMeshFilter.h"
 #include "Interactor/iGameInteractor.h"
 
-#include "MyFilter/iGameCellCenterFilter.h"
+#include "CellCenter/iGameCellCenterFilter.h"
 #include "MyFilter/iGameCleanToGridFilter.h"
 
 #include "Interactor/iGameInteractor.h"
@@ -2260,6 +2260,131 @@ void igQtMainWindow::initAllFilters() {
             return true;
         }
 
+        if (filterId == QStringLiteral("extract_subset")) {
+            connect(action, &QAction::triggered, this, [=, this](bool) {
+                const QString title = QStringLiteral("提取子集 (extract_subset)");
+                auto obj = currentFilterInput(title);
+                if (!obj) return;
+                auto structured = DynamicCast<StructuredMesh>(obj);
+                if (!structured) {
+                    showDarkFramelessMessage(title, QStringLiteral("Extract Subset 需要结构化网格输入。"));
+                    return;
+                }
+                igIndex* size = structured->GetDimensionSize();
+                igQtFilterDialogDockWidget* dialog = new igQtFilterDialogDockWidget(this, true);
+                dialog->setFilterTitle(title);
+                int minI = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("min I"), "0");
+                int maxI = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("max I"),
+                                                QString::number(size[0] - 1));
+                int minJ = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("min J"), "0");
+                int maxJ = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("max J"),
+                                                QString::number(size[1] - 1));
+                int minK = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("min K"), "0");
+                int maxK = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("max K"),
+                                                QString::number(size[2] - 1));
+                dialog->show();
+                dialog->setApplyFunctor([=, this]() {
+                    bool ok[6] = {};
+                    const int voi[6] = {
+                            dialog->getInt(minI, ok[0]), dialog->getInt(maxI, ok[1]),
+                            dialog->getInt(minJ, ok[2]), dialog->getInt(maxJ, ok[3]),
+                            dialog->getInt(minK, ok[4]), dialog->getInt(maxK, ok[5])};
+                    if (!ok[0] || !ok[1] || !ok[2] || !ok[3] || !ok[4] || !ok[5]) {
+                        showDarkFramelessMessage(title, QStringLiteral("请输入有效 VOI 范围。"));
+                        return;
+                    }
+                    auto filter = ExtractSubsetFilter::New();
+                    filter->SetInput(obj);
+                    filter->SetVOI(voi[0], voi[1], voi[2], voi[3], voi[4], voi[5]);
+                    if (!filter->Execute()) {
+                        showDarkFramelessMessage(title, QStringLiteral("提取结构化网格子集失败。"));
+                        return;
+                    }
+                    refreshFilterResult(obj, filter->GetOutput(), title);
+                    dialog->close();
+                });
+            });
+            return true;
+        }
+
+        if (filterId == QStringLiteral("outline_corners")) {
+            connect(action, &QAction::triggered, this, [=, this](bool) {
+                const QString title = QStringLiteral("轮廓角点 (outline_corners)");
+                auto obj = currentFilterInput(title);
+                if (!obj) return;
+                igQtFilterDialogDockWidget* dialog = new igQtFilterDialogDockWidget(this, true);
+                dialog->setFilterTitle(title);
+                int factorId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                    QStringLiteral("角长度比例"), "0.2");
+                dialog->show();
+                dialog->setApplyFunctor([=, this]() {
+                    bool ok = false;
+                    const double factor = dialog->getDouble(factorId, ok);
+                    if (!ok || factor <= 0.0) {
+                        showDarkFramelessMessage(title, QStringLiteral("请输入有效角长度比例。"));
+                        return;
+                    }
+                    auto filter = OutlineCornerFilter::New();
+                    filter->SetInput(obj);
+                    filter->SetCornerFactor(static_cast<float>(factor));
+                    if (!filter->Execute()) {
+                        showDarkFramelessMessage(title, QString::fromStdString(filter->GetMessage()));
+                        return;
+                    }
+                    refreshFilterResult(obj, filter->GetOutput(), title);
+                    dialog->close();
+                });
+            });
+            return true;
+        }
+
+        if (filterId == QStringLiteral("probe") || filterId == QStringLiteral("probe_location")) {
+            connect(action, &QAction::triggered, this, [this](bool) {
+                if (!rendererWidget->GetScene() || !rendererWidget->GetScene()->GetCurrentModel()) return;
+                auto* dock = findChild<QDockWidget*>(QStringLiteral("probeFilterPanel"));
+                if (!dock) {
+                    dock = new QDockWidget(QStringLiteral("探测 / 位置探测"), this);
+                    dock->setObjectName(QStringLiteral("probeFilterPanel"));
+                    auto* widget = new igQtProbeWidget(dock);
+                    dock->setWidget(widget);
+                    widget->setRenderWidget(rendererWidget);
+                    widget->setContext([this]() { return rendererWidget->GetScene(); }, modelTreeWidget,
+                                       [this]() { rendererWidget->update(); });
+                    addDockWidget(Qt::RightDockWidgetArea, dock);
+                    connect(modelTreeWidget, &igQtModelDialogWidget::CurrendModelChanged, widget,
+                            [dock, widget]() {
+                                if (dock->isVisible()) widget->refreshFromCurrentModel();
+                            });
+                }
+                auto* widget = qobject_cast<igQtProbeWidget*>(dock->widget());
+                widget->ensureQueryPointSet();
+                widget->refreshFromCurrentModel();
+                dock->show();
+                dock->raise();
+                resizeDocks({dock}, {440}, Qt::Horizontal);
+            });
+            return true;
+        }
+
+        if (filterId == QStringLiteral("convert_to_vertex")) {
+            connect(action, &QAction::triggered, this, [=, this](bool) {
+                const QString title = QStringLiteral("转换为顶点 (convert_to_vertex)");
+                auto obj = currentFilterInput(title);
+                if (!obj) return;
+                auto filter = ConvertToVertexFilter::New();
+                filter->SetInput(obj);
+                if (!filter->Execute()) {
+                    showDarkFramelessMessage(title, QStringLiteral("转换为顶点单元失败。"));
+                    return;
+                }
+                refreshFilterResult(obj, filter->GetOutput(), title);
+            });
+            return true;
+        }
+
+        return false;
+    };
+
     // 平面插值采样 (Plane Sampling)
     connect(ui->menu_filters->addAction(QStringLiteral("平面插值采样 (Plane Sampling)")), &QAction::triggered, this,
             [this](bool) {
@@ -2460,163 +2585,6 @@ void igQtMainWindow::initAllFilters() {
                 });
             });
 
-
-    /* Feature Edges is intentionally a first-level item under 算法处理. */
-    connect(ui->menu_filters->addAction(QStringLiteral("特征边提取 (Feature Edges)")), &QAction::triggered, this,
-            [this](bool) {
-                if (!rendererWidget || !rendererWidget->GetScene() || !rendererWidget->GetScene()->GetCurrentModel()) {
-                    showDarkFramelessMessage(QStringLiteral("无可用模型"), QStringLiteral("请先加载并选择模型。"));
-                    return;
-                }
-
-                auto scene = rendererWidget->GetScene();
-                auto input = scene->GetCurrentModel()->GetDataObject();
-                if (!input) {
-                    showDarkFramelessMessage(QStringLiteral("无可用模型"), QStringLiteral("当前模型没有可用数据。"));
-                    return;
-                }
-
-                /* FeatureEdgesFilter consumes a SurfaceMesh. Do not silently convert a
-         * volume mesh here: surface extraction is a separate user-visible
-         * operation under 算法处理 -> 数据处理. */
-                auto surfaceInput = DynamicCast<SurfaceMesh>(input);
-                if (!surfaceInput) {
-                    showDarkFramelessMessage(
-                            QStringLiteral("请先提取表面网格"),
-                            QStringLiteral(
-                                    "当前模型是体网格，特征边提取只支持表面网格。\n"
-                                    "请先在“算法处理 -> 数据处理 -> 表面提取 (Surface Extraction)”中执行表面提取，"
-                                    "再重新运行特征边提取。"));
-                    return;
-                }
-
-                if (!surfaceInput || surfaceInput->GetNumberOfPoints() == 0 || surfaceInput->GetNumberOfFaces() == 0) {
-                    showDarkFramelessMessage(QStringLiteral("无法提取特征边"),
-                                             QStringLiteral("当前模型没有可用的表面网格，请先执行表面提取。"));
-        if (filterId == QStringLiteral("extract_subset")) {
-            connect(action, &QAction::triggered, this, [=, this](bool) {
-                const QString title = QStringLiteral("提取子集 (extract_subset)");
-                auto obj = currentFilterInput(title);
-                if (!obj) return;
-                auto structured = DynamicCast<StructuredMesh>(obj);
-                if (!structured) {
-                    showDarkFramelessMessage(title, QStringLiteral("Extract Subset 需要结构化网格输入。"));
-                    return;
-                }
-                igIndex* size = structured->GetDimensionSize();
-                igQtFilterDialogDockWidget* dialog = new igQtFilterDialogDockWidget(this, true);
-                dialog->setFilterTitle(title);
-                int minI = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("min I"), "0");
-                int maxI = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("max I"),
-                                                QString::number(size[0] - 1));
-                int minJ = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("min J"), "0");
-                int maxJ = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("max J"),
-                                                QString::number(size[1] - 1));
-                int minK = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("min K"), "0");
-                int maxK = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("max K"),
-                                                QString::number(size[2] - 1));
-                dialog->show();
-                dialog->setApplyFunctor([=, this]() {
-                    bool ok[6] = {};
-                    const int voi[6] = {
-                            dialog->getInt(minI, ok[0]), dialog->getInt(maxI, ok[1]),
-                            dialog->getInt(minJ, ok[2]), dialog->getInt(maxJ, ok[3]),
-                            dialog->getInt(minK, ok[4]), dialog->getInt(maxK, ok[5])};
-                    if (!ok[0] || !ok[1] || !ok[2] || !ok[3] || !ok[4] || !ok[5]) {
-                        showDarkFramelessMessage(title, QStringLiteral("请输入有效 VOI 范围。"));
-                        return;
-                    }
-                    auto filter = ExtractSubsetFilter::New();
-                    filter->SetInput(obj);
-                    filter->SetVOI(voi[0], voi[1], voi[2], voi[3], voi[4], voi[5]);
-                    if (!filter->Execute()) {
-                        showDarkFramelessMessage(title, QStringLiteral("提取结构化网格子集失败。"));
-                        return;
-                    }
-                    refreshFilterResult(obj, filter->GetOutput(), title);
-                    dialog->close();
-                });
-            });
-            return true;
-        }
-
-        if (filterId == QStringLiteral("outline_corners")) {
-            connect(action, &QAction::triggered, this, [=, this](bool) {
-                const QString title = QStringLiteral("轮廓角点 (outline_corners)");
-                auto obj = currentFilterInput(title);
-                if (!obj) return;
-                igQtFilterDialogDockWidget* dialog = new igQtFilterDialogDockWidget(this, true);
-                dialog->setFilterTitle(title);
-                int factorId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
-                                                    QStringLiteral("角长度比例"), "0.2");
-                dialog->show();
-                dialog->setApplyFunctor([=, this]() {
-                    bool ok = false;
-                    const double factor = dialog->getDouble(factorId, ok);
-                    if (!ok || factor <= 0.0) {
-                        showDarkFramelessMessage(title, QStringLiteral("请输入有效角长度比例。"));
-                        return;
-                    }
-                    auto filter = OutlineCornerFilter::New();
-                    filter->SetInput(obj);
-                    filter->SetCornerFactor(static_cast<float>(factor));
-                    if (!filter->Execute()) {
-                        showDarkFramelessMessage(title, QString::fromStdString(filter->GetMessage()));
-                        return;
-                    }
-                    refreshFilterResult(obj, filter->GetOutput(), title);
-                    dialog->close();
-                });
-            });
-            return true;
-        }
-
-        if (filterId == QStringLiteral("probe") || filterId == QStringLiteral("probe_location")) {
-            connect(action, &QAction::triggered, this, [this](bool) {
-                if (!rendererWidget->GetScene() || !rendererWidget->GetScene()->GetCurrentModel()) return;
-                auto* dock = findChild<QDockWidget*>(QStringLiteral("probeFilterPanel"));
-                if (!dock) {
-                    dock = new QDockWidget(QStringLiteral("探测 / 位置探测"), this);
-                    dock->setObjectName(QStringLiteral("probeFilterPanel"));
-                    auto* widget = new igQtProbeWidget(dock);
-                    dock->setWidget(widget);
-                    widget->setRenderWidget(rendererWidget);
-                    widget->setContext([this]() { return rendererWidget->GetScene(); }, modelTreeWidget,
-                                       [this]() { rendererWidget->update(); });
-                    addDockWidget(Qt::RightDockWidgetArea, dock);
-                    connect(modelTreeWidget, &igQtModelDialogWidget::CurrendModelChanged, widget,
-                            [dock, widget]() {
-                                if (dock->isVisible()) widget->refreshFromCurrentModel();
-                            });
-                }
-                auto* widget = qobject_cast<igQtProbeWidget*>(dock->widget());
-                widget->ensureQueryPointSet();
-                widget->refreshFromCurrentModel();
-                dock->show();
-                dock->raise();
-                resizeDocks({dock}, {440}, Qt::Horizontal);
-            });
-            return true;
-        }
-
-        if (filterId == QStringLiteral("convert_to_vertex")) {
-            connect(action, &QAction::triggered, this, [=, this](bool) {
-                const QString title = QStringLiteral("转换为顶点 (convert_to_vertex)");
-                auto obj = currentFilterInput(title);
-                if (!obj) return;
-                auto filter = ConvertToVertexFilter::New();
-                filter->SetInput(obj);
-                if (!filter->Execute()) {
-                    showDarkFramelessMessage(title, QStringLiteral("转换为顶点单元失败。"));
-                    return;
-                }
-                refreshFilterResult(obj, filter->GetOutput(), title);
-            });
-            return true;
-        }
-
-        return false;
-    };
 
     for (const StandardFilterEntry& entry: standardFilterEntries) {
         const QString filterId = QString::fromLatin1(entry.id);

@@ -81,6 +81,7 @@
 #include <IQWidgets/igQtExtractComponentWidget.h>
 #include <IQWidgets/igQtExtractLocationWidget.h>
 #include <IQWidgets/igQtGlobalIdWidget.h>
+#include <IQWidgets/igQtLinearExtrusionWidget.h>
 #include <IQWidgets/igQtMergeVectorComponentsWidget.h>
 #include <IQWidgets/igQtModelClipWidget.h>
 #include <IQWidgets/igQtModelDrawWidget.h>
@@ -4420,6 +4421,87 @@ void igQtMainWindow::initAllFilters() {
         m_extractComponentDialog->show();
         m_extractComponentDialog->raise();
         m_extractComponentDialog->activateWindow();
+    });
+
+    // 线性拉伸 (Linear Extrusion)：按向量/点法向/点缩放三种规则把输入线性扫描出端面与侧面。
+    // 独立置顶弹窗（非模态）：不占用左侧工具面板，不点 X 不会消失；
+    // 继承语义：首次执行新增模型树节点，再次执行更新结果节点
+    QAction* linearExtrusion = ui->menu_filters->addAction(QStringLiteral("线性拉伸 (Linear Extrusion)"));
+    connect(linearExtrusion, &QAction::triggered, this, [this](bool checked) {
+        auto scene = rendererWidget->GetScene();
+        if (scene == nullptr || scene->GetCurrentModel() == nullptr) {
+            showDarkFramelessMessage(QStringLiteral("Warning"), QStringLiteral("请先选择一个模型。"));
+            return;
+        }
+        auto data = scene->GetCurrentModel()->GetDataObject();
+        if (data == nullptr) {
+            showDarkFramelessMessage(QStringLiteral("Warning"), QStringLiteral("当前模型没有数据。"));
+            return;
+        }
+        if (m_linearExtrusionDialog == nullptr) {
+            // 首次打开时创建独立弹窗：非模态 + 置顶，用户点 X 才关闭；
+            // 面板内容仍是 igQtLinearExtrusionWidget，只是宿主从左侧工具面板换成独立窗口
+            m_linearExtrusionDialog = new QDialog(this);
+            m_linearExtrusionDialog->setWindowTitle(QStringLiteral("线性拉伸"));
+            m_linearExtrusionDialog->setWindowFlag(Qt::WindowStaysOnTopHint, true);
+            // 面板配色只作用于本弹窗：黑底白字、边框可见、字号比全局 12pt 更小。
+            // 复选框必须连 ::indicator 一起显式定义：一旦给 QCheckBox 设了样式表，Qt 就不再画系统
+            // 原生指示器；而全局样式里的对勾图片路径写错了（qrc 前缀是 /Ticon，样式里却写成 :/icons/…，
+            // 大小写也不对），所以 :checked 只剩底色，看上去是个纯蓝色方块、分不出选中与否。
+            // image 必须给「文件路径 / :/资源路径」，Qt 样式表不接受 data: URI（内联 SVG 试过，不生效）；
+            // 也不能复用 Icons/check.png：它描边是 #1296DB，压在本面板蓝底 #0E639C 上对比度只有约 1.95，
+            // 14px 下看不出对勾，因此新增白色版 Icons/check_white.svg（对比度约 6.4）。
+            const QString panelStyle = QString::fromUtf8(
+                    "QDialog { background-color: #1E1E1E; }"
+                    "QLabel { color: #FFFFFF; font-size: 11px; }"
+                    "QLabel:disabled { color: #6A6A6A; }"
+                    "QGroupBox { color: #FFFFFF; border: 1px solid #3C3C3C; border-radius: 4px; padding: 4px; }"
+                    "QGroupBox:disabled { color: #6A6A6A; }"
+                    "QCheckBox { color: #FFFFFF; font-size: 11px; spacing: 6px; }"
+                    "QCheckBox::indicator { width: 14px; height: 14px; border: 1px solid #6A6A6A;"
+                    " border-radius: 2px; background-color: #2A2A2A; }"
+                    "QCheckBox::indicator:unchecked { background-color: #2A2A2A; }"
+                    "QCheckBox::indicator:checked { background-color: #0E639C; border: 1px solid #1F8AD2;"
+                    " image: url(:/Ticon/Icons/check_white.svg); }"
+                    "QCheckBox::indicator:disabled { border-color: #3C3C3C; background-color: #232323; }"
+                    "QComboBox, QLineEdit { background-color: #2A2A2A; color: #FFFFFF; border: 1px solid #4A4A4A;"
+                    " border-radius: 3px; padding: 2px 6px; min-height: 18px; font-size: 11px; }"
+                    "QComboBox:disabled, QLineEdit:disabled { color: #6A6A6A; }"
+                    "QComboBox QAbstractItemView { background-color: #2A2A2A; color: #FFFFFF;"
+                    " selection-background-color: #007399; }"
+                    "QPushButton { background-color: #2D2D30; color: #FFFFFF; border: 1px solid #4A4A4A;"
+                    " border-radius: 3px; padding: 3px 12px; min-height: 18px; font-size: 11px; }"
+                    "QPushButton:hover { background-color: #3A3A3D; }");
+            m_linearExtrusionDialog->setStyleSheet(panelStyle);
+            auto* layout = new QVBoxLayout(m_linearExtrusionDialog);
+            layout->setContentsMargins(0, 0, 0, 0);
+            // 不锁定弹窗尺寸：宽度与高度都交给用户自由拖动
+            layout->setSizeConstraint(QLayout::SetDefaultConstraint);
+            m_linearExtrusionWidget = new igQtLinearExtrusionWidget(m_linearExtrusionDialog);
+            m_linearExtrusionWidget->setMinimumSize(0, 0);
+            layout->addWidget(m_linearExtrusionWidget);
+            m_linearExtrusionDialog->setMinimumSize(0, 0);
+            m_linearExtrusionDialog->resize(360, 380);
+
+            connect(m_linearExtrusionWidget, &igQtLinearExtrusionWidget::DrawLinearExtrusionModel, this,
+                    [this](iGame::DataObject::Pointer res) {
+                        modelTreeWidget->addDataObjectToModelTree(res, ItemSource::Algorithm);
+                    });
+            connect(m_linearExtrusionWidget, &igQtLinearExtrusionWidget::UpdateLinearExtrusionModel, this,
+                    [this](iGame::DataObject::Pointer res) {
+                        modelTreeWidget->updateCurrentModelInfo();
+                        rendererWidget->update();
+                    });
+            connect(m_linearExtrusionWidget, &igQtLinearExtrusionWidget::ApplyFailed, this,
+                    [this](const QString& message) {
+                        showDarkFramelessMessage(QStringLiteral("Warning"), message);
+                    });
+        }
+        // 每次打开都按当前模型刷新输入数据
+        m_linearExtrusionWidget->SetOriginDataObject(data);
+        m_linearExtrusionDialog->show();
+        m_linearExtrusionDialog->raise();
+        m_linearExtrusionDialog->activateWindow();
     });
 
     // 新增 Transform 菜单项

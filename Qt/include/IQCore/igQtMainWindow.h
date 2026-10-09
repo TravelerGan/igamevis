@@ -49,6 +49,7 @@ class igQtExtractCellsByTypeWidget;
 class igQtAxisAlignedReflectionWidget;
 class igQtPointAndCellIdsWidget;
 class igQtExtractComponentWidget;
+class igQtLinearExtrusionWidget;
 class QDialog;
 
 
@@ -200,6 +201,10 @@ private:
     // 面板由用户点 X 关闭，关闭后再次打开复用同一面板（保留上次选择与结果节点）
     QDialog* m_extractComponentDialog = nullptr;
     igQtExtractComponentWidget* m_extractComponentWidget = nullptr;
+    // 线性拉伸：独立置顶弹窗（首次打开时懒创建），不占用左侧工具面板；
+    // 面板由用户点 X 关闭，关闭后再次打开复用同一面板（保留上次参数与结果节点）
+    QDialog* m_linearExtrusionDialog = nullptr;
+    igQtLinearExtrusionWidget* m_linearExtrusionWidget = nullptr;
     std::array<int, static_cast<size_t>(LeftToolPanelId::Count)> m_leftToolTabByPanel{
         {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1}};
 

@@ -373,6 +373,8 @@ igame_add_example(testCellMeshMetrics Filter/TestCellMeshMetrics.cpp)
 igame_add_example(testGhostDemo Filter/GhostCell/TestGhostDemo.cpp)
 igame_add_example(testBoundaryMeshQuality Filter/TestBoundaryMeshQuality.cpp)
 igame_add_example(testCleanToGridFilter Filter/TestCleanToGridFilter.cpp)
+# Modeling：线性拉伸（Linear Extrusion）
+igame_add_example(testLinearExtrusion Filter/TestLinearExtrusion.cpp)
 
 # Probe
 igame_add_example(testProbe Filter/Probe/TestProbe.cpp)

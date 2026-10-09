@@ -1,4 +1,10 @@
+// Regression: PR #170 deleted this example and its build target. Keep the
+// algorithm edge cases and model fixtures runnable after merging upstream.
+// Also retain PR #99's independent-output checks: execution must not mutate input.
+// Fix: Merge filter model regressions into interaction fixes.
+// Find: git log --diff-filter=A --oneline -- Examples/Filter/DataProcessing/OverlappingCellsDetector/TestOverlappingCellsDetector.cpp
 #include <DataProcessing/OverlappingCellsDetector/iGameOverlappingCellsDetectorFilter.h>
+#include <iGameFileIO.h>
 #include <iGameStructuredMesh.h>
 
 #include <array>
@@ -82,6 +88,26 @@ bool RunUnsupportedCase() {
         return false;
     }
     std::cout << "[PASS] unsupported triangle reports an error\n";
+    return true;
+}
+
+bool RunModelCase(const char* fileName, const std::vector<igIndex>& expectedCounts,
+                  const char* caseName) {
+    auto dataObject = iGame::FileIO::ReadFile(fileName);
+    auto mesh = iGame::DynamicCast<iGame::UnstructuredMesh>(dataObject);
+    if (mesh.IsNull()) {
+        std::cerr << "[FAIL] read " << fileName << '\n';
+        return false;
+    }
+
+    auto filter = iGame::OverlappingCellsDetectorFilter::New();
+    filter->SetInput(mesh);
+    filter->SetTolerance(0.0);
+    if (!filter->Execute() || filter->GetNumberOfOverlapsPerCell() != expectedCounts) {
+        std::cerr << "[FAIL] " << caseName << ": unexpected NumberOfOverlapsPerCell values\n";
+        return false;
+    }
+    std::cout << "[PASS] " << caseName << '\n';
     return true;
 }
 
@@ -182,6 +208,10 @@ int main() {
                                          iGame::Point(0.7f, 0.7f, 1.1f)}};
 
     bool passed = true;
+    passed &= RunModelCase("./Models/OverlappingCellsDetectorValidation.vtk",
+                           {1, 1, 0, 0}, "model: overlapping and disjoint tetrahedra");
+    passed &= RunModelCase("./Models/OverlappingCellsDetectorFaceTouching.vtk",
+                           {0, 0}, "model: face-touching tetrahedra");
     passed &= RunCase("disjoint tetrahedra", {{referenceTetra, iGame::IG_TETRA},
                                                {{{iGame::Point(2.0f, 0.0f, 0.0f), iGame::Point(3.0f, 0.0f, 0.0f),
                                                   iGame::Point(2.0f, 1.0f, 0.0f), iGame::Point(2.0f, 0.0f, 1.0f)}},

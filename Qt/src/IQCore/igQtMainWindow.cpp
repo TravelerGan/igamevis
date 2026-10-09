@@ -1,3 +1,4 @@
+#include <IQWidgets/igQtExtractLocationWidget.h>
 #include "IQCore/igQtMainWindow.h"
 #include <IQWidgets/igQtProbeWidget.h>
 //
@@ -3762,9 +3763,135 @@ void igQtMainWindow::initAllFilters() {
     bindDevelopmentAction("validate_cells", [executeDevelopmentFilter]() {
         executeDevelopmentFilter(QStringLiteral("单元几何校验"), ValidateCellsFilter::New());
     });
-    bindDevelopmentAction("overlapping_cells_detector", [executeDevelopmentFilter]() {
-        executeDevelopmentFilter(QStringLiteral("检测重叠单元"), OverlappingCellsDetectorFilter::New());
+    bindDevelopmentAction("overlapping_cells_detector", [this]() {
+        auto scene = rendererWidget->GetScene();
+        if (scene == nullptr || scene->GetCurrentModel() == nullptr) return;
+
+        const auto model = scene->GetCurrentModel();
+        const auto sourceModelId = scene->GetCurrentModelID();
+        const auto dataObject = model == nullptr ? nullptr : model->GetDataObject();
+        if (model == nullptr || dataObject == nullptr ||
+            (DynamicCast<UnstructuredMesh>(dataObject).IsNull() && DynamicCast<VolumeMesh>(dataObject).IsNull())) {
+            showDarkFramelessMessage(
+                    QStringLiteral("检测重叠单元"),
+                    QStringLiteral("请先在模型树中选择包含线性体单元的非结构网格、体网格或三维结构网格。"));
+            return;
+        }
+
+        auto* dialog = new igQtFilterDialogDockWidget(this, true);
+        dialog->setFilterTitle(QStringLiteral("检测重叠单元"));
+        dialog->setFilterDescription(QStringLiteral(
+                "检测当前输入网格内部具有真实共同体积的单元。支持线性四面体、六面体、三棱柱和金字塔单元。<br>"
+                "执行后生成单元标量 <b>NumberOfOverlapsPerCell</b>；值大于 0 的单元以选中边线高亮显示。<br>"
+                "仅共享面、边或点的单元不会被视为重叠；点集、表面、高阶、多面体和复合数据会给出安全提示。"));
+        const int toleranceId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                     QStringLiteral("公差 (Tolerance)"), "0.0");
+        dialog->show();
+        dialog->setApplyFunctor([this, dialog, model, scene, sourceModelId, toleranceId]() {
+            bool toleranceOk = false;
+            const double tolerance = dialog->getDouble(toleranceId, toleranceOk);
+            if (!toleranceOk || tolerance < 0.0) {
+                showDarkFramelessMessage(QStringLiteral("检测重叠单元"), QStringLiteral("公差必须是非负数。"));
+                return;
+            }
+            if (model == nullptr) return;
+
+            auto filter = OverlappingCellsDetectorFilter::New();
+            filter->SetInput(model->GetDataObject());
+            filter->SetTolerance(tolerance);
+            if (!filter->Execute()) {
+                const auto& error = filter->GetLastError();
+                showDarkFramelessMessage(
+                        QStringLiteral("检测重叠单元"),
+                        QStringLiteral("执行失败：%1")
+                                .arg(error.empty() ? QStringLiteral("未知错误。") : QString::fromStdString(error)));
+                return;
+            }
+
+            // Filter 返回独立网格；原模型及其属性保持不变。
+            auto data = filter->GetOutput();
+            if (data == nullptr) {
+                showDarkFramelessMessage(QStringLiteral("检测重叠单元"),
+                                         QStringLiteral("执行失败：未生成有效输出。"));
+                return;
+            }
+            const auto outputModelId = modelTreeWidget->addDataObjectToModelTree(
+                    data, ItemSource::Algorithm);
+            auto outputModel = scene->GetModelById(outputModelId);
+            const int attributeIndex = data->GetAttributeSet()->GetAttributeIndex(
+                    OverlappingCellsDetectorFilter::NumberOfOverlapsPerCellArrayName());
+            auto item = modelTreeWidget->getItemFromObject(data);
+            if (item != nullptr && attributeIndex >= 0 && attributeIndex < item->childCount()) {
+                item->setExpanded(true);
+                auto* child = item->child(attributeIndex);
+                item->setCurrentChild(child);
+                item->setSelected(false);
+                item->viewAttribute(attributeIndex, 0);
+                child->setSelected(true);
+                modelTreeWidget->setCurrentItem(child);
+            }
+
+            std::vector<igIndex> overlappingCellIds;
+            const auto& overlapCounts = filter->GetNumberOfOverlapsPerCell();
+            for (igIndex cellId = 0; cellId < overlapCounts.size(); ++cellId) {
+                if (overlapCounts[cellId] > 0) overlappingCellIds.push_back(cellId);
+            }
+            QStringList overlapCountPreview;
+            constexpr int kPreviewCount = 20;
+            for (int cellId = 0; cellId < static_cast<int>(overlapCounts.size()) && cellId < kPreviewCount; ++cellId) {
+                overlapCountPreview.push_back(QString::number(overlapCounts[cellId]));
+            }
+            const QString countText =
+                    overlapCounts.size() <= kPreviewCount
+                            ? QStringLiteral("[%1]").arg(overlapCountPreview.join(QStringLiteral(", ")))
+                            : QStringLiteral("[%1, ...]").arg(overlapCountPreview.join(QStringLiteral(", ")));
+            auto selection = outputModel == nullptr ? nullptr : outputModel->GetSelection();
+            if (selection != nullptr) {
+                selection->Reset();
+                if (!overlappingCellIds.empty()) {
+                    selection->SelectionCallBackEvent(IG_CELL, overlappingCellIds, Selection::Operate::Add);
+                    selection->SetSelectItemVisable(true);
+                }
+            }
+            if (outputModel != nullptr) {
+                model->SetVisibility(false);
+                outputModel->SetVisibility(true);
+                scene->SetCurrentModel(outputModel);
+
+                // 该结果与输入节点采用互斥显示：选择输入时恢复原始外观，
+                // 选择结果时显示标量和重叠高亮，避免结果轮廓覆盖原模型。
+                const bool hasOverlaps = !overlappingCellIds.empty();
+                connect(modelTreeWidget, &igQtModelDialogWidget::CurrendModelChanged, this,
+                        [this, scene, sourceModelId, outputModelId, hasOverlaps]() {
+                            auto sourceModel = scene->GetModelById(sourceModelId);
+                            auto resultModel = scene->GetModelById(outputModelId);
+                            if (resultModel == nullptr) return;
+
+                            const auto currentModelId = scene->GetCurrentModelID();
+                            const bool resultSelected = currentModelId == outputModelId;
+                            resultModel->SetVisibility(resultSelected);
+                            if (auto resultSelection = resultModel->GetSelection())
+                                resultSelection->SetSelectItemVisable(resultSelected && hasOverlaps);
+
+                            if (sourceModel != nullptr &&
+                                (currentModelId == sourceModelId || resultSelected))
+                                sourceModel->SetVisibility(!resultSelected);
+                            rendererWidget->update();
+                        });
+            }
+            rendererWidget->update();
+
+            showDarkFramelessMessage(QStringLiteral("检测重叠单元"),
+                                     QStringLiteral("检测完成：发现 %1 对重叠单元；高亮 %2 个单元。<br>"
+                                                    "NumberOfOverlapsPerCell = %3")
+                                             .arg(static_cast<qulonglong>(filter->GetOverlappingCellPairs().size()))
+                                             .arg(static_cast<qulonglong>(overlappingCellIds.size()))
+                                             .arg(countText));
+            dialog->close();
+        });
     });
+
+
     bindDevelopmentAction("ghost_cells", [executeDevelopmentFilter]() {
         executeDevelopmentFilter(QStringLiteral("Ghost 单元标记"), GhostCellFilter::New());
     });
@@ -3774,30 +3901,23 @@ void igQtMainWindow::initAllFilters() {
     bindDevelopmentAction("multiblock_surface_as_multiblock", [executeDevelopmentFilter]() {
         executeDevelopmentFilter(QStringLiteral("多块模型表面提取"), MultiBlockGeometryFilter::New());
     });
-    bindDevelopmentAction("extract_location", [=, this]() {
-        const QString title = QStringLiteral("提取指定位置数据");
-        auto input = currentFilterInput(title);
-        if (!input) return;
-        auto* dialog = new igQtFilterDialogDockWidget(this, true);
-        dialog->setFilterTitle(title);
-        const int x = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("X"), "0");
-        const int y = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("Y"), "0");
-        const int z = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("Z"), "0");
-        dialog->show();
-        dialog->setApplyFunctor([=, this]() {
-            bool ox = false, oy = false, oz = false;
-            const double px = dialog->getDouble(x, ox), py = dialog->getDouble(y, oy), pz = dialog->getDouble(z, oz);
-            if (!ox || !oy || !oz) { showDarkFramelessMessage(title, QStringLiteral("坐标必须是数字。")); return; }
-            auto filter = ExtractLocationFilter::New();
-            filter->SetInput(input);
-            filter->SetLocation(px, py, pz);
-            if (!filter->Execute()) {
-                showDarkFramelessMessage(title, QString::fromStdString(filter->GetLastError()));
-                return;
-            }
-            refreshFilterResult(input, filter->GetOutput(), title);
-            dialog->close();
-        });
+    bindDevelopmentAction("extract_location", [this]() {
+        auto model = rendererWidget->GetScene()->GetCurrentModel();
+        if (!model) {
+            showDarkFramelessMessage(QStringLiteral("提取指定位置数据"),
+                                     QStringLiteral("请先在模型树中选择一个网格模型。"));
+            return;
+        }
+        auto* panel = new igQtExtractLocationWidget(rendererWidget, modelTreeWidget, model, this);
+        if (!panel->isReady()) {
+            showDarkFramelessMessage(QStringLiteral("提取指定位置数据"),
+                                     QStringLiteral("当前仅支持非结构网格（UnstructuredMesh）；操作已取消。"));
+            panel->deleteLater();
+            return;
+        }
+        panel->show();
+        panel->raise();
+        panel->activateWindow();
     });
 
     bindDevelopmentAction("extract_cells_by_region", [=, this]() {

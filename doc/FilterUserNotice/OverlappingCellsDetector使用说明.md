@@ -2,7 +2,7 @@
 
 ## 功能
 
-Overlapping Cells Detector 用于检测输入体网格中具有真实公共体积的重叠单元。执行后会在输入网格的单元数据中添加标量数组 `NumberOfOverlapsPerCell`，其值表示每个单元与其他多少个单元发生重叠。仅接触于点、边或面的单元不计为体积重叠。
+Overlapping Cells Detector 用于检测输入体网格中具有真实公共体积的重叠单元。执行后生成独立输出网格，并在输出网格的单元数据中添加标量数组 `NumberOfOverlapsPerCell`，其值表示每个单元与其他多少个单元发生重叠。仅接触于点、边或面的单元不计为体积重叠。
 
 当前支持 `UnstructuredMesh` 和 `VolumeMesh` 中的线性四面体、六面体、三棱柱和金字塔单元；具有有效三维体单元连接关系的 `StructuredMesh` 也可处理。不支持的输入或单元类型会给出提示，不会导致程序崩溃。
 
@@ -12,8 +12,9 @@ Overlapping Cells Detector 用于检测输入体网格中具有真实公共体�
 
 1. 打开一个受支持的体网格，并在模型树中选中该模型。
 2. 在【算法处理 → 开发中 Filter】菜单中选择【检测重叠单元 (Overlapping Cells Detector)】。
-3. 当前菜单使用默认公差 `0` 执行；C++ 接口可设置非负公差。
-4. 在模型树中选择 `NumberOfOverlapsPerCell` 查看结果。PR #99 恢复公差面板、重叠高亮及独立输出，保证原模型不变。
+3. 设置非负的“公差”；通常从 `0` 开始。
+4. 点击“执行”。程序会新增独立结果节点，生成 `NumberOfOverlapsPerCell`，并高亮存在重叠的单元；原模型及其属性保持不变。
+5. 选择原模型恢复原始外观；选择结果节点显示重叠标量与高亮，两者互斥显示。
 
 ### C++ 接口
 
@@ -24,6 +25,7 @@ filter->SetTolerance(0.0);
 if (!filter->Execute()) {
     std::cerr << filter->GetLastError() << '\n';
 }
+auto output = filter->GetOutput();
 const auto& counts = filter->GetNumberOfOverlapsPerCell();
 ```
 

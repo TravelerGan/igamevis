@@ -686,6 +686,10 @@ igame_add_example(testProbe Filter/Probe/TestProbe.cpp)
 igame_add_example(testConvertToVertex Filter/Convert/TestConvertToVertex.cpp)
 igame_add_example(testExtractSubset Filter/TestExtractSubset.cpp)
 
+# Extract Location and Overlapping Cells Detector regression examples.
+igame_add_example(testExtractLocation Filter/DataProcessing/ExtractLocation/TestExtractLocation.cpp)
+igame_add_example(testOverlappingCellsDetector Filter/DataProcessing/OverlappingCellsDetector/TestOverlappingCellsDetector.cpp)
+
 get_property(IGAME_EXAMPLE_TARGETS DIRECTORY PROPERTY IGAME_EXAMPLE_TARGETS)
 if (NOT IGAME_EXAMPLE_TARGETS)
     set(IGAME_EXAMPLE_TARGETS "")

@@ -1,3 +1,9 @@
+// Source: dayuwan77/igamevis at eccac729b57aeacbe9312d7d5189f6990bb4eebd.
+// Integration gap: e7ec6571 imported the filter but omitted its example.
+// Preserve the numerical/attribute checks below and reject invalid inputs;
+// visual examples support --no-render so CI requires a real exit status.
+// Integration commit: test: add examples for first-batch standard filters
+// Find it: git log --diff-filter=A --format="%h %s" -- Examples/Filter/FeatureExtraction/FeatureEdgesVisualization.cpp
 #include <FeatureExtraction/iGameFeatureEdgesFilter.h>
 
 #include <iGameDrawObject.h>
@@ -11,20 +17,9 @@
 #include <iostream>
 #include <string>
 
-int main(
-    int argc,
-    char** argv) {
-    if (argc != 2) {
-        std::cerr
-            << "Usage: "
-            << "testFeatureEdgesVisualization.exe "
-            << "<model-file>"
-            << std::endl;
-        return 1;
-    }
-
+int main() {
     const std::string fileName =
-        argv[1];
+        "./Models/FeatureEdges_Cube.vtk";
 
     std::cout
         << "Input file: "
@@ -192,6 +187,8 @@ int main(
         << "Edge Ids attribute index: "
         << edgeIdsIndex
         << std::endl;
+
+    if (noRender) return 0;
 
     auto scene =
         iGame::Scene::New();

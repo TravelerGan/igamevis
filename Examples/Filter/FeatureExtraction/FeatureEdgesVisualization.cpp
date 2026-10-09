@@ -17,21 +17,9 @@
 #include <iostream>
 #include <string>
 
-int main(
-    int argc,
-    char** argv) {
-    const bool noRender = argc == 3 && std::string(argv[2]) == "--no-render";
-    if (argc != 2 && !noRender) {
-        std::cerr
-            << "Usage: "
-            << "testFeatureEdgesVisualization.exe "
-            << "<model-file>"
-            << std::endl;
-        return 1;
-    }
-
+int main() {
     const std::string fileName =
-        argv[1];
+        "./Models/FeatureEdges_Cube.vtk";
 
     std::cout
         << "Input file: "

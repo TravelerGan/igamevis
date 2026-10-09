@@ -1,3 +1,7 @@
+// Regression: PR #170 deleted this example and its build target. Keep the
+// algorithm edge cases and model fixtures runnable after merging upstream.
+// Fix: Merge upstream main and restore filter model regressions.
+// Find: git log --diff-filter=A --oneline -- Examples/Filter/DataProcessing/OverlappingCellsDetector/TestOverlappingCellsDetector.cpp
 #include <DataProcessing/OverlappingCellsDetector/iGameOverlappingCellsDetectorFilter.h>
 #include <iGameFileIO.h>
 #include <iGameStructuredMesh.h>

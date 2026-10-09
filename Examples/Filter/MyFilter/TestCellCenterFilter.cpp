@@ -1,3 +1,9 @@
+// Source: dayuwan77/igamevis at eccac729b57aeacbe9312d7d5189f6990bb4eebd.
+// Integration gap: e7ec6571 imported the filter but omitted its example.
+// Preserve the numerical/attribute checks below and reject invalid inputs;
+// visual examples support --no-render so CI requires a real exit status.
+// Integration commit: test: add examples for first-batch standard filters
+// Find it: git log --diff-filter=A --format="%h %s" -- Examples/Filter/MyFilter/TestCellCenterFilter.cpp
 #include <MyFilter/iGameCellCenterFilter.h>
 #include <iGameFileIO.h>
 #include <iGameInteractor.h>
@@ -5,12 +11,17 @@
 #include <iGamePointSet.h>
 #include <iGameRenderWindow.h>
 #include <iGameScene.h>
+#include <cmath>
+#include <string>
 
-int main() {
+int main(int argc, char** argv) {
+    const bool noRender = argc > 1 && std::string(argv[1]) == "--no-render";
     // Read a mesh file and run the CellCenterFilter on it.
-    // ClipTest_Plane_UnstructuredGrid.vtk 同时带点属性和单元属性，
-    // 可以完整验证 filter 的两条属性分支（点属性插值 / 单元属性保留）。
-    const std::string fileName = "./Models/ClipTest_Plane_UnstructuredGrid.vtk";
+    // CellCenter_hexa_grid.vtk：2 层 3x3 格点 → 4 个六面体，
+    // 带 float/double 点属性和 double 单元属性。
+    // 单元中心坐标已知：(0.5/1.5, 0.5/1.5, 0.5)，可精确校验几何中心；
+    // double 属性用于校验输出数组类型/精度保留（createLikeArray）。
+    const std::string fileName = "./Models/CellCenter_hexa_grid.vtk";
 
     auto obj = iGame::FileIO::ReadFile(fileName);
     if (obj == nullptr) {
@@ -54,6 +65,25 @@ int main() {
     }
     std::cout << "PASS: one output point per input cell" << std::endl;
 
+    // 校验几何中心坐标：4 个六面体中心应为
+    // (0.5,0.5,0.5) (1.5,0.5,0.5) (0.5,1.5,0.5) (1.5,1.5,0.5)
+    if (inCellNum == 4) {
+        const double expect[4][3] = {
+            {0.5, 0.5, 0.5}, {1.5, 0.5, 0.5},
+            {0.5, 1.5, 0.5}, {1.5, 1.5, 0.5}};
+        for (IGsize c = 0; c < 4; c++) {
+            auto p = centerSet->GetPoint(c);
+            for (int d = 0; d < 3; d++) {
+                if (std::fabs(p[d] - expect[c][d]) > 1e-5) {
+                    std::cout << "FAIL: center[" << c << "] coord[" << d
+                              << "]=" << p[d] << " expected " << expect[c][d] << std::endl;
+                    return 1;
+                }
+            }
+        }
+        std::cout << "PASS: cell centers match expected coordinates" << std::endl;
+    }
+
     // 校验属性：属性总数应被保留（点属性插值后仍在，单元属性原样保留）
     const IGsize outAttrNum =
             out->GetAttributeSet() ? out->GetAttributeSet()->GetNumberOfAttributes() : 0;
@@ -73,15 +103,25 @@ int main() {
         const IGsize elemNum = attr.pointer->GetNumberOfElements();
         std::cout << "  attr[" << i << "] name=" << attr.pointer->GetName()
                   << " attachment=" << attr.attachmentType
+                  << " arrayType=" << attr.pointer->GetArrayType()
                   << " elements=" << elemNum << std::endl;
         if (elemNum != outPointNum) {
             std::cout << "FAIL: attribute length != output point count" << std::endl;
+            return 1;
+        }
+        // double 输入属性（pid_double / cid）输出后仍应为 DoubleArray，精度不丢失
+        std::string an = attr.pointer->GetName();
+        if ((an == "pid_double" || an == "cid") && attr.pointer->GetArrayType() != IG_DoubleArray) {
+            std::cout << "FAIL: double attribute " << an
+                      << " lost its type after filter" << std::endl;
             return 1;
         }
     }
 
     std::cout << "PASS: all attribute lengths match output points" << std::endl;
     std::cout << "PASS: CellCenterFilter test finished" << std::endl;
+
+    if (noRender) return 0;
 
     // Show the result in a render window
     // PointSet 默认视图样式是"填充面"，但没有面单元，必须切到 IG_POINTS 才能显示点云；

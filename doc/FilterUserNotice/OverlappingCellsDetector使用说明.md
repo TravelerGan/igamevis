@@ -11,9 +11,9 @@ Overlapping Cells Detector 用于检测输入体网格中具有真实公共体�
 ### iGameVis 图形界面
 
 1. 打开一个受支持的体网格，并在模型树中选中该模型。
-2. 在【算法处理】一级菜单中选择【检测重叠单元 (Overlapping Cells Detector)】。
-3. 设置非负的“公差”；通常从 `0` 开始。
-4. 点击“执行”。程序会生成 `NumberOfOverlapsPerCell`，并高亮存在重叠的单元。
+2. 在【算法处理 → 开发中 Filter】菜单中选择【检测重叠单元 (Overlapping Cells Detector)】。
+3. 当前菜单使用默认公差 `0` 执行；C++ 接口可设置非负公差。
+4. 在模型树中选择 `NumberOfOverlapsPerCell` 查看结果。PR #99 恢复公差面板、重叠高亮及独立输出，保证原模型不变。
 
 ### C++ 接口
 

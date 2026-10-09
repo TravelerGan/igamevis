@@ -1,3 +1,9 @@
+// Source: dayuwan77/igamevis at eccac729b57aeacbe9312d7d5189f6990bb4eebd.
+// Integration gap: e7ec6571 imported the filter but omitted its example.
+// Preserve the numerical/attribute checks below and reject invalid inputs;
+// visual examples support --no-render so CI requires a real exit status.
+// Integration commit: test: add examples for first-batch standard filters
+// Find it: git log --diff-filter=A --format="%h %s" -- Examples/Filter/MyFilter/TestCellCenterFilter.cpp
 #include <MyFilter/iGameCellCenterFilter.h>
 #include <iGameFileIO.h>
 #include <iGameInteractor.h>
@@ -8,7 +14,8 @@
 #include <cmath>
 #include <string>
 
-int main() {
+int main(int argc, char** argv) {
+    const bool noRender = argc > 1 && std::string(argv[1]) == "--no-render";
     // Read a mesh file and run the CellCenterFilter on it.
     // CellCenter_hexa_grid.vtk：2 层 3x3 格点 → 4 个六面体，
     // 带 float/double 点属性和 double 单元属性。
@@ -113,6 +120,8 @@ int main() {
 
     std::cout << "PASS: all attribute lengths match output points" << std::endl;
     std::cout << "PASS: CellCenterFilter test finished" << std::endl;
+
+    if (noRender) return 0;
 
     // Show the result in a render window
     // PointSet 默认视图样式是"填充面"，但没有面单元，必须切到 IG_POINTS 才能显示点云；

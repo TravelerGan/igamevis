@@ -44,6 +44,27 @@
 #include "Convert/iGameConvertToPointDataFilter.h"
 #include "Convert/iGameConvertToSurfaceMeshFilter.h"
 #include "Convert/iGameConvertToVolumeMeshFilter.h"
+#include "DataProcessing/iGameRandomAttributesFilter.h"
+#include "FeatureExtraction/iGameDeflectNormalsFilter.h"
+#include "Convert/iGamePointSetToOctreeFilter.h"
+#include "Convert/iGameResampleToImageFilter.h"
+#include "MeshQuality/iGameMeshQualityFilter.h"
+
+#include "Transformation/iGameTransformFilter.h"
+
+#include "FeatureExtraction/iGameFeatureEdgesFilter.h"
+#include "FeatureExtraction/iGamePlaneSamplingFilter.h"
+#include "Selection/iGameExtractCellsByRegionFilter.h"
+#include "MyFilter/iGameExtractCellsByTypeFilter.h"
+
+#include "Convert/iGameConvertToPointCloudFilter.h"
+#include "Convert/iGameConvertToPointDataFilter.h"
+#include "Convert/iGameConvertToSurfaceMeshFilter.h"
+#include "Convert/iGameConvertToVolumeMeshFilter.h"
+#include "Interactor/iGameInteractor.h"
+
+#include "MyFilter/iGameCellCenterFilter.h"
+#include "MyFilter/iGameCleanToGridFilter.h"
 
 #include "Interactor/iGameInteractor.h"
 
@@ -2239,6 +2260,239 @@ void igQtMainWindow::initAllFilters() {
             return true;
         }
 
+    // 平面插值采样 (Plane Sampling)
+    connect(ui->menu_filters->addAction(QStringLiteral("平面插值采样 (Plane Sampling)")), &QAction::triggered, this,
+            [this](bool) {
+                auto currentModel = rendererWidget->GetScene()->GetCurrentModel();
+                if (!currentModel) {
+                    showDarkFramelessMessage(QStringLiteral("提示"), QStringLiteral("请先加载一个模型"));
+                    return;
+                }
+
+                auto obj = currentModel->GetDataObject();
+                if (!obj) {
+                    showDarkFramelessMessage(QStringLiteral("提示"), QStringLiteral("当前模型没有有效数据"));
+                    return;
+                }
+
+                igQtFilterDialogDockWidget* dialog = new igQtFilterDialogDockWidget(this, true);
+                dialog->setFilterTitle(QStringLiteral("平面插值采样"));
+                dialog->setFilterDescription(QStringLiteral("在指定平面上生成规则采样点，读取模型在该位置的数值。"));
+
+                // ---- 添加参数控件 ----
+                int originXId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                     QStringLiteral("平面原点 X"), "0.0");
+                int originYId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                     QStringLiteral("平面原点 Y"), "0.0");
+                int originZId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                     QStringLiteral("平面原点 Z"), "0.0");
+
+                int normalXId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                     QStringLiteral("平面法向 X"), "0.0");
+                int normalYId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                     QStringLiteral("平面法向 Y"), "0.0");
+                int normalZId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                     QStringLiteral("平面法向 Z"), "1.0");
+
+                int resolutionId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                        QStringLiteral("采样分辨率 (NxN)"), "20");
+
+                // ---- 获取模型属性列表 ----
+                std::vector<QString> attrNames;
+                auto attrSet = obj->GetAttributeSet();
+                if (attrSet) {
+                    auto allAttrs = attrSet->GetAllAttributes();
+                    if (allAttrs && allAttrs->GetNumberOfElements() > 0) {
+                        for (igIndex i = 0; i < allAttrs->GetNumberOfElements(); i++) {
+                            auto& attr = allAttrs->GetElement(i);
+                            if (attr.pointer && !attr.isDeleted) {
+                                QString name = QString::fromStdString(attr.pointer->GetName());
+                                if (std::find(attrNames.begin(), attrNames.end(), name) == attrNames.end()) {
+                                    attrNames.push_back(name);
+                                }
+                            }
+                        }
+                    }
+                }
+                if (attrNames.empty()) { attrNames.push_back(QStringLiteral("无可用属性")); }
+
+                int attrId = dialog->addParameter(igQtFilterDialogDockWidget::QT_COMBO_BOX, QStringLiteral("采样属性"),
+                                                  attrNames);
+
+                // ---- 显示对话框 ----
+                dialog->show();
+
+                // ---- Apply 回调 ----
+                dialog->setApplyFunctor([=, this]() {
+                    bool ok;
+
+                    double originX = dialog->getDouble(originXId, ok);
+                    if (!ok) {
+                        showDarkFramelessMessage(QStringLiteral("参数错误"), QStringLiteral("请输入有效的平面原点 X"));
+                        return;
+                    }
+                    double originY = dialog->getDouble(originYId, ok);
+                    if (!ok) {
+                        showDarkFramelessMessage(QStringLiteral("参数错误"), QStringLiteral("请输入有效的平面原点 Y"));
+                        return;
+                    }
+                    double originZ = dialog->getDouble(originZId, ok);
+                    if (!ok) {
+                        showDarkFramelessMessage(QStringLiteral("参数错误"), QStringLiteral("请输入有效的平面原点 Z"));
+                        return;
+                    }
+
+                    double normalX = dialog->getDouble(normalXId, ok);
+                    if (!ok) {
+                        showDarkFramelessMessage(QStringLiteral("参数错误"), QStringLiteral("请输入有效的平面法向 X"));
+                        return;
+                    }
+                    double normalY = dialog->getDouble(normalYId, ok);
+                    if (!ok) {
+                        showDarkFramelessMessage(QStringLiteral("参数错误"), QStringLiteral("请输入有效的平面法向 Y"));
+                        return;
+                    }
+                    double normalZ = dialog->getDouble(normalZId, ok);
+                    if (!ok) {
+                        showDarkFramelessMessage(QStringLiteral("参数错误"), QStringLiteral("请输入有效的平面法向 Z"));
+                        return;
+                    }
+
+                    if (std::abs(normalX) < 1e-10 && std::abs(normalY) < 1e-10 && std::abs(normalZ) < 1e-10) {
+                        showDarkFramelessMessage(QStringLiteral("参数错误"), QStringLiteral("平面法向不能为零向量"));
+                        return;
+                    }
+
+                    int resolution = dialog->getInt(resolutionId, ok);
+                    if (!ok || resolution < 2) {
+                        showDarkFramelessMessage(QStringLiteral("参数错误"),
+                                                 QStringLiteral("采样分辨率必须为大于 1 的整数"));
+                        return;
+                    }
+
+                    int attrIdx = dialog->getComboIndex(attrId, ok);
+                    std::string attrName = "";
+                    if (ok && attrIdx >= 0 && attrIdx < (int) attrNames.size()) {
+                        QString selectedName = attrNames[attrIdx];
+                        if (selectedName != QStringLiteral("无可用属性")) { attrName = selectedName.toStdString(); }
+                    }
+
+                    // ---- 执行滤镜 ----
+                    auto filter = PlaneSamplingFilter::New();
+                    filter->SetInput(obj);
+
+                    double origin[3] = {originX, originY, originZ};
+                    double normal[3] = {normalX, normalY, normalZ};
+                    filter->SetPlaneOrigin(origin);
+                    filter->SetPlaneNormal(normal);
+                    filter->SetResolution(resolution);
+
+                    if (!attrName.empty()) { filter->SetAttributeName(attrName); }
+
+                    if (!filter->Execute()) {
+                        showDarkFramelessMessage(QStringLiteral("执行失败"),
+                                                 QStringLiteral("平面采样执行失败，请检查输入数据"));
+                        return;
+                    }
+
+                    auto output = filter->GetOutput();
+                    if (!output) {
+                        showDarkFramelessMessage(QStringLiteral("执行失败"), QStringLiteral("滤镜没有产生输出"));
+                        return;
+                    }
+
+                    QString outputName = QString::fromStdString(obj->GetName()) + "_plane_sampling";
+                    output->SetName(outputName.toStdString());
+
+                    modelTreeWidget->addDataObjectToModelTree(output, ItemSource::Algorithm);
+
+                    // ---- 自动切换到新模型 ----
+                    auto scene = rendererWidget->GetScene();
+                    auto modelList = scene->GetModelList();
+                    for (auto it = modelList->Begin(); it != modelList->End(); ++it) {
+                        auto model = it->second;
+                        if (model->GetDataObject() == output) {
+                            scene->SetCurrentModel(model);
+                            break;
+                        }
+                    }
+
+                    // ---- 自动显示第一个属性 ----
+                    auto outputAttrSet = output->GetAttributeSet();
+                    if (outputAttrSet && outputAttrSet->GetNumberOfAttributes() > 0) {
+                        for (igIndex i = 0; i < outputAttrSet->GetNumberOfAttributes(); i++) {
+                            auto& attr = outputAttrSet->GetAttribute(i);
+                            if (attr.pointer) {
+                                QString name = QString::fromStdString(attr.pointer->GetName());
+                                if (name != "vtkValidPointMask") {
+                                    auto drawObj = DynamicCast<DrawObject>(output);
+                                    if (drawObj) {
+                                        drawObj->ViewCloudPicture(scene, i, -1);
+                                        modelTreeWidget->updateAllAttriubute(output);
+                                        auto item = modelTreeWidget->getItemFromObject(output);
+                                        if (item && item->childCount() > i) {
+                                            item->setExpanded(true);
+                                            auto child = item->child(i);
+                                            if (child) {
+                                                item->setCurrentChild(child);
+                                                item->setSelected(false);
+                                                child->setSelected(true);
+                                                modelTreeWidget->setCurrentItem(child);
+                                            }
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    rendererWidget->update();
+
+                    showDarkFramelessMessage(QStringLiteral("采样完成"),
+                                             QStringLiteral("生成了 %1 x %2 = %3 个采样点")
+                                                     .arg(resolution)
+                                                     .arg(resolution)
+                                                     .arg(resolution * resolution),
+                                             true);
+
+                    dialog->close();
+                });
+            });
+
+
+    /* Feature Edges is intentionally a first-level item under 算法处理. */
+    connect(ui->menu_filters->addAction(QStringLiteral("特征边提取 (Feature Edges)")), &QAction::triggered, this,
+            [this](bool) {
+                if (!rendererWidget || !rendererWidget->GetScene() || !rendererWidget->GetScene()->GetCurrentModel()) {
+                    showDarkFramelessMessage(QStringLiteral("无可用模型"), QStringLiteral("请先加载并选择模型。"));
+                    return;
+                }
+
+                auto scene = rendererWidget->GetScene();
+                auto input = scene->GetCurrentModel()->GetDataObject();
+                if (!input) {
+                    showDarkFramelessMessage(QStringLiteral("无可用模型"), QStringLiteral("当前模型没有可用数据。"));
+                    return;
+                }
+
+                /* FeatureEdgesFilter consumes a SurfaceMesh. Do not silently convert a
+         * volume mesh here: surface extraction is a separate user-visible
+         * operation under 算法处理 -> 数据处理. */
+                auto surfaceInput = DynamicCast<SurfaceMesh>(input);
+                if (!surfaceInput) {
+                    showDarkFramelessMessage(
+                            QStringLiteral("请先提取表面网格"),
+                            QStringLiteral(
+                                    "当前模型是体网格，特征边提取只支持表面网格。\n"
+                                    "请先在“算法处理 -> 数据处理 -> 表面提取 (Surface Extraction)”中执行表面提取，"
+                                    "再重新运行特征边提取。"));
+                    return;
+                }
+
+                if (!surfaceInput || surfaceInput->GetNumberOfPoints() == 0 || surfaceInput->GetNumberOfFaces() == 0) {
+                    showDarkFramelessMessage(QStringLiteral("无法提取特征边"),
+                                             QStringLiteral("当前模型没有可用的表面网格，请先执行表面提取。"));
         if (filterId == QStringLiteral("extract_subset")) {
             connect(action, &QAction::triggered, this, [=, this](bool) {
                 const QString title = QStringLiteral("提取子集 (extract_subset)");

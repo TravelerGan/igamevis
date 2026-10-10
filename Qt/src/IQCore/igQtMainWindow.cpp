@@ -5291,6 +5291,58 @@ void igQtMainWindow::initAllFilters() {
                 });
                 dialog->show();
             });
+    // ---------- 三角面线性细分 (Subdivide)：追加在“开发中filter/第二批”菜单末尾 ----------
+    QAction* subdivideAction = developingFiltersBatch2->addAction(QStringLiteral("三角面细分 (Subdivide)"));
+    connect(subdivideAction, &QAction::triggered, this,
+            [this](bool checked) {
+                auto* scene = rendererWidget->GetScene();
+                if (scene == nullptr || scene->GetCurrentModel() == nullptr) {
+                    showDarkFramelessMessage(QStringLiteral("无可用模型"),
+                                             QStringLiteral("请先加载并选择一个网格模型。"));
+                    return;
+                }
+                auto model = scene->GetCurrentModel();
+                auto obj = model->GetDataObject();
+                if (obj == nullptr) {
+                    showDarkFramelessMessage(QStringLiteral("无可用数据"),
+                                             QStringLiteral("当前模型没有可用的网格数据。"));
+                    return;
+                }
+
+                igQtFilterDialogDockWidget* dialog = new igQtFilterDialogDockWidget(this, true);
+                dialog->setFilterTitle(QStringLiteral("三角面细分 (Subdivide)"));
+                int subId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                 QStringLiteral("细分次数 (1~8，每次三角形数量 ×4)"), "1");
+                dialog->setApplyFunctor([=, this]() {
+                    bool ok = false;
+                    int tms = dialog->getInt(subId, ok);
+                    if (!ok || tms < 1 || tms > 8) {
+                        showDarkFramelessMessage(QStringLiteral("Warning"),
+                                                 QStringLiteral("请输入 1 ~ 8 之间的整数细分次数。"));
+                        return;
+                    }
+
+                    auto filter = SubdivideFilter::New();
+                    filter->SetNumberOfSubdivisions(tms);
+                    filter->SetInput(obj);
+                    if (!filter->Execute()) {
+                        showDarkFramelessMessage(
+                                QStringLiteral("数据类型不匹配"),
+                                QStringLiteral("三角面细分仅支持多边形表面网格（Poly Data），请检查输入数据类型。"));
+                        return;
+                    }
+
+                    auto outMesh = DynamicCast<SurfaceMesh>(filter->GetOutput());
+                    modelTreeWidget->addDataObjectToModelTree(outMesh, Algorithm);
+                    rendererWidget->update();
+                    // 先弹模态提示（面板仍在、布局稳定），用户点“确定”后再关面板
+                    showDarkFramelessMessage(QStringLiteral("三角面细分完成"),
+                                             QStringLiteral("已对三角面做线性细分，旧顶点保持不变、边中点为线性插值；"
+                                                            "可将显示模式改为 Surface With Edges 查看加密后的网格。"),
+                                             true);
+                    dialog->close();
+                });
+                dialog->show();
 
     // 反转面朝向 (Reverse Sense)。
     connect(developingFiltersBatch2->addAction(QStringLiteral("反转面朝向 (Reverse Sense)")),

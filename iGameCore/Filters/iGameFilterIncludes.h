@@ -51,6 +51,8 @@
 #include "Animation/iGameAttrDiff.h"
 #include "AttributeManipulation/iGameRandomVectorsFilter.h"
 
+#include "AppendReduce/iGameAppendReduceFilter.h"
+#include "Tube/iGameTube.h"
 #include "Attribute/iGameExtractComponentFilter.h"
 #include "AxisAlignedReflection/iGameAxisAlignedReflectionFilter.h"
 #include "CellSize/iGameCellSizeFilter.h"

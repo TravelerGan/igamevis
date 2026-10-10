@@ -95,6 +95,7 @@
 #include <IQWidgets/igQtExtractLocationWidget.h>
 #include <IQWidgets/igQtGlobalIdWidget.h>
 #include <IQWidgets/igQtLinearExtrusionWidget.h>
+#include <IQWidgets/igQtAxisAlignedReflectionWidget.h>
 #include <IQWidgets/igQtMergeVectorComponentsWidget.h>
 #include <IQWidgets/igQtModelClipWidget.h>
 #include <IQWidgets/igQtModelDrawWidget.h>
@@ -4284,6 +4285,75 @@ void igQtMainWindow::initAllFilters() {
     bindDevelopmentAction("cell_mesh_metrics", [executeDevelopmentFilter]() {
         executeDevelopmentFilter(QStringLiteral("单元网格指标"), CellMeshMetricsFilter::New());
     });
+    bindDevelopmentAction("axis_aligned_reflection", [this]() {
+        auto scene = rendererWidget->GetScene();
+        if (!scene || !scene->GetCurrentModel()) {
+            showDarkFramelessMessage(QStringLiteral("反射"), QStringLiteral("请先选择一个模型。"));
+            return;
+        }
+        auto input = scene->GetCurrentModel()->GetDataObject();
+        if (!DynamicCast<UnstructuredMesh>(input)) {
+            showDarkFramelessMessage(QStringLiteral("反射"),
+                                     QStringLiteral("当前版本仅支持非结构网格 (UnstructuredMesh)。"));
+            return;
+        }
+
+        // 首次打开：懒创建右侧 Dock，连接面板的 applyRequested 执行反射
+        if (m_axisAlignedReflectionDock == nullptr) {
+            m_axisAlignedReflectionDock = igQtAxisAlignedReflectionWidget::createDockWidget(this);
+            addDockWidget(Qt::RightDockWidgetArea, m_axisAlignedReflectionDock);
+            auto* reflectionWidget = qobject_cast<igQtAxisAlignedReflectionWidget*>(
+                    m_axisAlignedReflectionDock->widget());
+            connect(reflectionWidget, &igQtAxisAlignedReflectionWidget::applyRequested, this,
+                    [this, reflectionWidget]() {
+                        if (!m_axisAlignedReflectionFilter) return;
+                        m_axisAlignedReflectionFilter->SetPlane(reflectionWidget->plane());
+                        m_axisAlignedReflectionFilter->SetCenter(reflectionWidget->center());
+                        m_axisAlignedReflectionFilter->SetCopyInput(reflectionWidget->copyInput());
+                        m_axisAlignedReflectionFilter->SetFlipAllInputArrays(
+                                reflectionWidget->flipAllInputArrays());
+                        if (!m_axisAlignedReflectionFilter->Execute()) {
+                            showDarkFramelessMessage(QStringLiteral("反射"),
+                                                     QStringLiteral("反射执行失败，请检查输入网格和参数。"));
+                            return;
+                        }
+                        auto output = DynamicCast<UnstructuredMesh>(
+                                m_axisAlignedReflectionFilter->GetOutput());
+                        if (!output) {
+                            showDarkFramelessMessage(QStringLiteral("反射"),
+                                                     QStringLiteral("反射未生成有效的非结构网格。"));
+                            return;
+                        }
+                        const QString outputName =
+                                QStringLiteral("Reflect_%1").arg(m_axisAlignedReflectionCount);
+                        output->SetName(outputName.toStdString());
+                        if (!m_axisAlignedReflectionModel) {
+                            const int id = modelTreeWidget->addDataObjectToModelTree(output, Algorithm);
+                            m_axisAlignedReflectionModel =
+                                    rendererWidget->GetScene()->GetModelById(id);
+                        } else {
+                            m_axisAlignedReflectionModel->SetDataObject(output);
+                            modelTreeWidget->updateItemName(output);
+                            modelTreeWidget->updateAllAttriubute(output);
+                            modelTreeWidget->updateCurrentModelInfo();
+                        }
+                        rendererWidget->update();
+                    });
+        }
+
+        // 每次打开：为当前模型创建新 filter 并重置面板
+        m_axisAlignedReflectionFilter = AxisAlignedReflectionFilter::New();
+        m_axisAlignedReflectionFilter->SetInput(input);
+        m_axisAlignedReflectionModel = nullptr;
+        ++m_axisAlignedReflectionCount;
+
+        auto* reflectionWidget = qobject_cast<igQtAxisAlignedReflectionWidget*>(
+                m_axisAlignedReflectionDock->widget());
+        reflectionWidget->resetParameters();
+        m_axisAlignedReflectionDock->show();
+        m_axisAlignedReflectionDock->raise();
+        reflectionWidget->setFocus(Qt::OtherFocusReason);
+    });
     bindDevelopmentAction("multiblock_surface_as_multiblock", [executeDevelopmentFilter]() {
         executeDevelopmentFilter(QStringLiteral("多块模型表面提取"), MultiBlockGeometryFilter::New());
     });
@@ -5092,6 +5162,134 @@ void igQtMainWindow::initAllFilters() {
 
         dlg->show();
     });
+
+    // ---------- 管道生成 (Tube)：追加在“开发中filter/第二批”菜单末尾 ----------
+    QAction* tubeAction = developingFiltersBatch2->addAction(QStringLiteral("管道生成 (Tube)"));
+    connect(tubeAction, &QAction::triggered, this,
+            [this](bool checked) {
+                auto* scene = rendererWidget->GetScene();
+                if (scene == nullptr || scene->GetCurrentModel() == nullptr) {
+                    showDarkFramelessMessage(QStringLiteral("无可用模型"),
+                                             QStringLiteral("请先加载并选择一个网格模型。"));
+                    return;
+                }
+                auto model = scene->GetCurrentModel();
+                auto obj = model->GetDataObject();
+                if (obj == nullptr) {
+                    showDarkFramelessMessage(QStringLiteral("无可用数据"),
+                                             QStringLiteral("当前模型没有可用的网格数据。"));
+                    return;
+                }
+
+                igQtFilterDialogDockWidget* dialog = new igQtFilterDialogDockWidget(this, true);
+                dialog->setFilterTitle(QStringLiteral("管道生成 (Tube)"));
+                dialog->setFilterDescription(QStringLiteral(
+                    "将线段（如流线、折线）沿路径扫掠成圆管。<br>"
+                    "在每个路径点上确定垂直于前进方向的平面，画一个由半径和边数决定的正多边形截面，"
+                    "再沿路径对齐、缝合。<br>"
+                    "截面朝向通过平行传递延续，不会翻转；首尾可用端面封闭。"));
+
+                const int radiusId = dialog->addParameter(
+                        igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                        QStringLiteral("半径 (Radius)"), "0.1");
+                const int sidesId = dialog->addParameter(
+                        igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                        QStringLiteral("边数 (Number Of Sides)"), "6");
+                const int capId = dialog->addParameter(
+                        igQtFilterDialogDockWidget::QT_CHECK_BOX,
+                        QStringLiteral("端面封端 (Capping)"), "true");
+                const int useDefId = dialog->addParameter(
+                        igQtFilterDialogDockWidget::QT_CHECK_BOX,
+                        QStringLiteral("手动指定初始法向 (Use Default Normal)"), "false");
+                const int nxId = dialog->addParameter(
+                        igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                        QStringLiteral("初始法向 X (Normal X)"), "0");
+                const int nyId = dialog->addParameter(
+                        igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                        QStringLiteral("初始法向 Y (Normal Y)"), "0");
+                const int nzId = dialog->addParameter(
+                        igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                        QStringLiteral("初始法向 Z (Normal Z)"), "1");
+
+                // 加宽面板，避免说明文字与标签过度换行
+                dialog->setFixedWidth(660);
+
+                // “手动指定初始法向”勾选后，下方三个初始法向输入框才可用（默认置灰）
+                auto* useDefCheck = qobject_cast<QCheckBox*>(dialog->getWidget(useDefId));
+                QWidget* nxEdit = dialog->getWidget(nxId);
+                QWidget* nyEdit = dialog->getWidget(nyId);
+                QWidget* nzEdit = dialog->getWidget(nzId);
+                auto syncNormalEditors = [nxEdit, nyEdit, nzEdit](bool on) {
+                    nxEdit->setEnabled(on);
+                    nyEdit->setEnabled(on);
+                    nzEdit->setEnabled(on);
+                };
+                connect(useDefCheck, &QCheckBox::toggled, dialog, syncNormalEditors);
+                syncNormalEditors(false);
+                useDefCheck->setToolTip(QStringLiteral(
+                    "勾选后，使用下方“初始法向 X/Y/Z”指定的方向确定第一个截面的朝向；"
+                    "不勾选（默认）则由程序自动选择（管子起始竖直时也会自动换轴）。"));
+                const QString normalEditTip = QStringLiteral(
+                    "仅在勾选上方“手动指定初始法向”后生效，用于确定第一个截面的初始朝向。");
+                nxEdit->setToolTip(normalEditTip);
+                nyEdit->setToolTip(normalEditTip);
+                nzEdit->setToolTip(normalEditTip);
+
+                dialog->setApplyFunctor([this, dialog, obj, radiusId, sidesId,
+                                        capId, useDefId, nxId, nyId, nzId]() {
+                    bool rok = false, sok = false,
+                         cok = false, uok = false,
+                         xok = false, yok = false, zok = false;
+
+                    double radius = dialog->getDouble(radiusId, rok);
+                    int sides = dialog->getInt(sidesId, sok);
+                    bool capping = dialog->getChecked(capId, cok);
+                    bool useDef = dialog->getChecked(useDefId, uok);
+                    double nx = dialog->getDouble(nxId, xok);
+                    double ny = dialog->getDouble(nyId, yok);
+                    double nz = dialog->getDouble(nzId, zok);
+
+                    if (!rok || radius <= 0.0) {
+                        showDarkFramelessMessage(QStringLiteral("参数错误"),
+                                                 QStringLiteral("半径必须是大于 0 的数字。"));
+                        return;
+                    }
+                    if (!sok || sides < 3) {
+                        showDarkFramelessMessage(QStringLiteral("参数错误"),
+                                                 QStringLiteral("边数必须是不小于 3 的整数。"));
+                        return;
+                    }
+
+                    TubeFilter::Pointer filter = TubeFilter::New();
+                    filter->SetInput(obj);
+                    filter->SetRadius(radius);
+                    filter->SetNumberOfSides(sides);
+                    filter->SetCapping(cok ? capping : true);
+                    filter->SetUseDefaultNormal(uok ? useDef : false);
+                    if (xok && yok && zok)
+                        filter->SetDefaultNormal(Vector3d(nx, ny, nz));
+
+                    if (!filter->Execute()) {
+                        showDarkFramelessMessage(
+                                QStringLiteral("数据类型不匹配"),
+                                QStringLiteral("管道生成仅支持含线段（IG_LINE / IG_POLY_LINE）的"
+                                               "非结构网格或表面网格，请检查输入数据类型。"));
+                        return;
+                    }
+
+                    auto outMesh = DynamicCast<SurfaceMesh>(filter->GetOutput());
+                    modelTreeWidget->addDataObjectToModelTree(outMesh, Algorithm);
+                    rendererWidget->update();
+                    // 先弹模态提示（此时参数面板仍在、主窗口布局稳定），
+                    // 用户点“确定”返回后再关闭面板，避免先 close dock 触发布局
+                    // 重建、紧接着开模态对话框而导致 Qt 访问违例。
+                    showDarkFramelessMessage(QStringLiteral("管道生成完成"),
+                                             QStringLiteral("已将线段转换为圆管，可在模型树中查看输出结果。"),
+                                             true);
+                    dialog->close();
+                });
+                dialog->show();
+            });
 }
 
 void igQtMainWindow::initAllDockWidgetConnectWithAction() {

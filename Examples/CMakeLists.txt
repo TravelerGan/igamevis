@@ -703,6 +703,10 @@ igame_add_example(testForceStaticMesh Filter/ForceStaticMesh/TestForceStaticMesh
 # Append Attributes: merges point/cell attribute arrays from several inputs sharing the same layout.
 igame_add_example(testAppendAttributes Filter/AppendAttributes/TestAppendAttributes.cpp)
 
+# ReverseSense
+igame_add_example(testReverseSense Filter/ReverseSense/TestReverseSense.cpp)
+igame_add_example(testReverseSenseSelfCheck Filter/ReverseSense/TestReverseSenseSelfCheck.cpp)
+
 get_property(IGAME_EXAMPLE_TARGETS DIRECTORY PROPERTY IGAME_EXAMPLE_TARGETS)
 if (NOT IGAME_EXAMPLE_TARGETS)
     set(IGAME_EXAMPLE_TARGETS "")

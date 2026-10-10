@@ -12,6 +12,7 @@
 #include "MeshMetrics/iGameCellMeshMetricsFilter.h"
 #include "ModelSurface/iGameMultiBlockGeometryFilter.h"
 #include "MyFilter/iGameValidateCellsFilter.h"
+#include "AppendAttributes/iGameAppendAttributesFilter.h"
 #include "AppendReduce/iGameAppendReduceFilter.h"
 #include "DataProcessing/ExtractLocation/iGameExtractLocationFilter.h"
 #include "DataProcessing/iGameRandomAttributesFilter.h"
@@ -4606,6 +4607,202 @@ void igQtMainWindow::initAllFilters() {
     addDevelopmentAction(developingAttributes, approvedFilter("random_vectors"),
             QStringLiteral("随机向量 (Random Vectors)"));
 
+    // 开发中filter/第二批：后续新增 filter 追加在该菜单末尾。
+    // ---------- 追加属性 (Append Attributes) ----------
+    QAction* appendAttributesAction =
+            developingFiltersBatch2->addAction(QStringLiteral("追加属性 (Append Attributes)"));
+    appendAttributesAction->setData(QStringLiteral("append_attributes"));
+    connect(appendAttributesAction, &QAction::triggered, this, [this](bool) {
+        auto scene = rendererWidget->GetScene();
+        if (scene == nullptr) { return; }
+        auto modelList = scene->GetModelList();
+        if (!modelList) { return; }
+
+        struct AppendInputInfo {
+            QString name;
+            DataObject::Pointer object;
+            IGsize points{0};
+            IGsize cells{0};
+        };
+        // 计算单元数，用于在界面上提示各输入是否逐项对应
+        auto cellCountOf = [](DataObject::Pointer obj) -> IGsize {
+            switch (obj->GetDataObjectType()) {
+                case IG_POINT_SET:
+                    return 0;
+                case IG_SURFACE_MESH: {
+                    auto mesh = DynamicCast<SurfaceMesh>(obj);
+                    return mesh ? mesh->GetNumberOfFaces() : IGsize(0);
+                }
+                case IG_VOLUME_MESH: {
+                    auto mesh = DynamicCast<VolumeMesh>(obj);
+                    return mesh ? mesh->GetNumberOfVolumes() : IGsize(0);
+                }
+                case IG_UNSTRUCTURED_MESH: {
+                    auto mesh = DynamicCast<UnstructuredMesh>(obj);
+                    return mesh ? mesh->GetNumberOfCells() : IGsize(0);
+                }
+                case IG_STRUCTURED_MESH: {
+                    auto mesh = DynamicCast<StructuredMesh>(obj);
+                    return mesh ? mesh->GetNumberOfCells() : IGsize(0);
+                }
+                default: {
+                    auto cells = obj->GetCellArray();
+                    return cells ? cells->GetNumberOfCells() : IGsize(0);
+                }
+            }
+        };
+
+        std::vector<AppendInputInfo> infos;
+        for (auto it = modelList->Begin(); it != modelList->End(); ++it) {
+            auto model = it->second;
+            if (!model) { continue; }
+            auto dataObj = model->GetDataObject();
+            if (!dataObj) { continue; }
+            const IGenum type = dataObj->GetDataObjectType();
+            if (type != IG_POINT_SET && type != IG_SURFACE_MESH && type != IG_VOLUME_MESH &&
+                type != IG_UNSTRUCTURED_MESH && type != IG_STRUCTURED_MESH) {
+                continue;
+            }
+            AppendInputInfo info;
+            info.object = dataObj;
+            info.name = QString::fromStdString(dataObj->GetName());
+            auto pts = dataObj->GetPoints();
+            info.points = pts ? pts->GetNumberOfPoints() : IGsize(0);
+            info.cells = cellCountOf(dataObj);
+            infos.push_back(info);
+        }
+        if (infos.empty()) {
+            showDarkFramelessMessage(QStringLiteral("追加属性"),
+                                        QStringLiteral("场景中没有可用于追加属性的数据对象。"));
+            return;
+        }
+
+        igQtChromeFramelessDialog* dlg = new igQtChromeFramelessDialog(this);
+        dlg->setDialogTitle(QStringLiteral("追加属性 (Append Attributes)"));
+        dlg->setMaximizeEnabled(false);
+        dlg->setAttribute(Qt::WA_DeleteOnClose);
+
+        QWidget* content = new QWidget(dlg->contentHost());
+        content->setStyleSheet(
+                "QWidget { background-color: #252526; color: #D4D4D4; }"
+                "QCheckBox { color: #D4D4D4; spacing: 6px; }"
+                "QCheckBox::indicator { width: 16px; height: 16px; }"
+                "QCheckBox::indicator:unchecked { border: 1px solid #6A6A6A; background-color: #3A3A3A; }"
+                "QCheckBox::indicator:checked { border: 1px solid #0E639C; background-color: #0E639C; }"
+                "QCheckBox::indicator:unchecked:hover { border: 1px solid #9A9A9A; }"
+                "QCheckBox::indicator:checked:hover { background-color: #1177BB; }"
+                "QPushButton { background-color: #3A3A3A; color: #D4D4D4; border: 1px solid #4A4A4A; "
+                "              padding: 6px 12px; border-radius: 4px; }"
+                "QPushButton:hover { background-color: #4A4A4A; border-color: #5A5A5A; }"
+                "QPushButton:pressed { background-color: #2A2A2A; }"
+                "QScrollArea { background-color: #1E1E1E; border: none; }"
+                "QScrollBar:vertical { background: #1E1E1E; width: 10px; margin: 0; }"
+                "QScrollBar::handle:vertical { background: #4A4A4A; border-radius: 5px; min-height: 20px; }"
+                "QScrollBar::handle:vertical:hover { background: #5A5A5A; }"
+                "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }");
+        QVBoxLayout* mainLayout = new QVBoxLayout(content);
+        mainLayout->setContentsMargins(12, 12, 12, 12);
+        mainLayout->setSpacing(8);
+
+        QLabel* tip = new QLabel(
+                QStringLiteral("选择要合并属性的数据对象（列表顺序即输入顺序，第一个提供输出几何与数据类型）。\n"
+                                "要求所选对象的点数和单元数逐项对应；同名的属性会全部保留，"),
+                content);
+        tip->setWordWrap(true);
+        mainLayout->addWidget(tip);
+
+        QHBoxLayout* btnLayout = new QHBoxLayout();
+        QPushButton* selectAllBtn = new QPushButton(QStringLiteral("全选"), content);
+        QPushButton* deselectAllBtn = new QPushButton(QStringLiteral("全不选"), content);
+        btnLayout->addWidget(selectAllBtn);
+        btnLayout->addWidget(deselectAllBtn);
+        btnLayout->addStretch();
+        mainLayout->addLayout(btnLayout);
+
+        QScrollArea* scrollArea = new QScrollArea(content);
+        scrollArea->setWidgetResizable(true);
+        scrollArea->setFrameShape(QFrame::NoFrame);
+        QWidget* listWidget = new QWidget(scrollArea);
+        QVBoxLayout* listLayout = new QVBoxLayout(listWidget);
+        listLayout->setSpacing(4);
+        listLayout->setContentsMargins(0, 0, 0, 0);
+        QList<QCheckBox*> checkBoxes;
+        for (const AppendInputInfo& info: infos) {
+            QCheckBox* cb = new QCheckBox(QStringLiteral("%1  (点: %2, 单元: %3)")
+                                                    .arg(info.name)
+                                                    .arg(info.points)
+                                                    .arg(info.cells),
+                                            listWidget);
+            cb->setChecked(true);
+            checkBoxes.append(cb);
+            listLayout->addWidget(cb);
+        }
+        listWidget->setLayout(listLayout);
+        scrollArea->setWidget(listWidget);
+        mainLayout->addWidget(scrollArea);
+
+        QCheckBox* pointCb = new QCheckBox(QStringLiteral("追加点属性 (Point Data)"), content);
+        pointCb->setChecked(true);
+        QCheckBox* cellCb = new QCheckBox(QStringLiteral("追加单元属性 (Cell Data)"), content);
+        cellCb->setChecked(true);
+        mainLayout->addWidget(pointCb);
+        mainLayout->addWidget(cellCb);
+
+        QDialogButtonBox* buttonBox =
+                new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, content);
+        mainLayout->addWidget(buttonBox);
+
+        dlg->setContentWidget(content);
+        dlg->resize(440, 540);
+
+        connect(selectAllBtn, &QPushButton::clicked, [checkBoxes]() {
+            for (QCheckBox* cb: checkBoxes) { cb->setChecked(true); }
+        });
+        connect(deselectAllBtn, &QPushButton::clicked, [checkBoxes]() {
+            for (QCheckBox* cb: checkBoxes) { cb->setChecked(false); }
+        });
+        connect(buttonBox, &QDialogButtonBox::accepted, this, [this, dlg, checkBoxes, infos, pointCb, cellCb]() {
+            std::vector<DataObject::Pointer> selected;
+            for (int i = 0; i < checkBoxes.size(); ++i) {
+                if (checkBoxes[i]->isChecked()) { selected.push_back(infos[i].object); }
+            }
+            if (selected.empty()) {
+                showDarkFramelessMessage(QStringLiteral("追加属性"), QStringLiteral("请至少选择一个数据对象。"));
+                return;
+            }
+            if (!pointCb->isChecked() && !cellCb->isChecked()) {
+                showDarkFramelessMessage(QStringLiteral("追加属性"),
+                                            QStringLiteral("请至少勾选「点属性」或「单元属性」之一。"));
+                return;
+            }
+
+            auto filter = AppendAttributes::New();
+            for (const auto& obj: selected) { filter->AddInput(obj); }
+            filter->SetAppendPointData(pointCb->isChecked());
+            filter->SetAppendCellData(cellCb->isChecked());
+
+            if (!filter->Execute()) {
+                showDarkFramelessMessage(
+                        QStringLiteral("追加属性"),
+                        QStringLiteral("执行失败：请确认所选数据对象的点数与单元数逐项对应。"));
+                return;
+            }
+            auto output = filter->GetOutput();
+            if (!output) {
+                showDarkFramelessMessage(QStringLiteral("追加属性"), QStringLiteral("算法未产生有效结果。"));
+                return;
+            }
+            output->SetName(selected[0]->GetName() + "_appended");
+            modelTreeWidget->addDataObjectToModelTree(output, Algorithm);
+            rendererWidget->GetScene()->Modified();
+            rendererWidget->GetScene()->Update();
+            rendererWidget->update();
+            dlg->accept();
+        });
+        connect(buttonBox, &QDialogButtonBox::rejected, dlg, &QDialog::reject);
+
+        dlg->show();
+    });
 }
 
 void igQtMainWindow::initAllDockWidgetConnectWithAction() {

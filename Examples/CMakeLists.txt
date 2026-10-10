@@ -691,6 +691,9 @@ igame_add_example(testExtractLocationDrag Filter/DataProcessing/ExtractLocation/
 # Force Static Mesh: cached geometry (pinned to the frame that built the cache) + attribute updates.
 igame_add_example(testForceStaticMesh Filter/ForceStaticMesh/TestForceStaticMesh.cpp)
 
+# Append Attributes: merges point/cell attribute arrays from several inputs sharing the same layout.
+igame_add_example(testAppendAttributes Filter/AppendAttributes/TestAppendAttributes.cpp)
+
 get_property(IGAME_EXAMPLE_TARGETS DIRECTORY PROPERTY IGAME_EXAMPLE_TARGETS)
 if (NOT IGAME_EXAMPLE_TARGETS)
     set(IGAME_EXAMPLE_TARGETS "")

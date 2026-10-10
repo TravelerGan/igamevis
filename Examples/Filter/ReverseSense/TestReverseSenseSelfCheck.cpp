@@ -251,7 +251,7 @@ void TestFailures() {
 // BUG: attributes went through double and silently changed 64-bit IDs above 2^53.
 // Trigger: multi-component point/cell arrays, including signed and unsigned extrema, then copy/extract.
 // Expected: exact native values, original type and independent buffers for every supported numeric type.
-// Fix commit: 待提交 (用户要求仅本地修改，不提交).
+// Fix commit: da905e77dd70f824c6ec9ade05be99332115aad6.
 template<class Array, class Value>
 void CheckExactAttributeCopy(Value first, Value second) {
     auto src = MakeQuadSurface();
@@ -308,7 +308,7 @@ void TestExactAttributes() {
 
 // BUG: repeated failure exposed the previous successful output; integer normal negation could overflow.
 // Expected: failures clear output and reject unrepresentable normal values; valid float normals still work.
-// Fix commit: 待提交.
+// Fix commit: da905e77dd70f824c6ec9ade05be99332115aad6.
 void TestReuseAndIntegerNormals() {
     auto src = MakeQuadSurface(); auto f = ReverseSenseFilter::New(); f->SetInput(src);
     Expect(f->Execute(), "reuse begins with a valid output");

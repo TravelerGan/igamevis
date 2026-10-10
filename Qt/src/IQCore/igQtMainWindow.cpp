@@ -22,6 +22,7 @@
 #include "Selection/iGameExtractCellsByRegionFilter.h"
 #include "Transformation/iGameTransformFilter.h"
 #include "VolumeOfRevolution/iGameVolumeOfRevolutionFilter.h"
+#include "ReverseSense/iGameReverseSenseFilter.h"
 #include "WarpByScalar/iGameWarpByScalarFilter.h"
 #include "Deformation/iGameStressDeformationFilterCode.h"
 #include "ExtractEnclosedPoints/iGameExtractEnclosedPointsFilter.h"
@@ -5342,6 +5343,75 @@ void igQtMainWindow::initAllFilters() {
                     dialog->close();
                 });
                 dialog->show();
+
+    // 反转面朝向 (Reverse Sense)。
+    connect(developingFiltersBatch2->addAction(QStringLiteral("反转面朝向 (Reverse Sense)")),
+            &QAction::triggered, this, [this](bool) {
+                auto scene = rendererWidget ? rendererWidget->GetScene() : nullptr;
+                auto currentModel = scene ? scene->GetCurrentModel() : nullptr;
+                if (!currentModel) {
+                    showDarkFramelessMessage(QStringLiteral("反转面朝向"), QStringLiteral("请先选择一个模型。"));
+                    return;
+                }
+                auto object = currentModel->GetDataObject();
+                if (iGame::DynamicCast<iGame::SurfaceMesh>(object).IsNull()) {
+                    showDarkFramelessMessage(QStringLiteral("反转面朝向"),
+                                             QStringLiteral("当前模型不是曲面网格（SurfaceMesh）"));
+                    return;
+                }
+
+                auto* dialog = new igQtFilterDialogDockWidget(this, true);
+                dialog->setFilterTitle(QStringLiteral("反转面朝向"));
+                dialog->setFilterDescription(QStringLiteral("反转面的顶点环序，并可取反法向"));
+                const int cellsId = dialog->addParameter(
+                        igQtFilterDialogDockWidget::QT_CHECK_BOX, QStringLiteral("反转面顶点顺序"), "true");
+                const int normalsId = dialog->addParameter(
+                        igQtFilterDialogDockWidget::QT_CHECK_BOX, QStringLiteral("反转法向"), "true");
+                dialog->setParameterLayoutVertical();
+                auto* help = new QLabel(QStringLiteral(
+                        "反转面顶点顺序：改变面的朝向。\n"
+                        "反转法向：取反已有的点法向和面法向，不生成新法向。"), dialog);
+                help->setWordWrap(true);
+                help->setContentsMargins(0, 8, 0, 0);
+                dialog->addRowWidget(help);
+                dialog->setMinimumWidth(420);
+                dialog->resize(qMax(460, help->fontMetrics().horizontalAdvance(
+                        QStringLiteral("反转法向：取反已有的点法向和面法向")) + 80), 330);
+                if (auto* scrollArea = dialog->findChild<QScrollArea*>(QStringLiteral("scrollArea"))) {
+                    scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+                }
+                dialog->show();
+
+                dialog->setApplyFunctor([=, this]() {
+                    bool ok = false;
+                    auto filter = iGame::ReverseSenseFilter::New();
+                    filter->SetReverseCells(dialog->getChecked(cellsId, ok));
+                    filter->SetReverseNormals(dialog->getChecked(normalsId, ok));
+                    filter->SetInput(object);
+                    if (!filter->Execute()) {
+                        showDarkFramelessMessage(
+                                QStringLiteral("反转面朝向"),
+                                QStringLiteral("执行失败：%1").arg(QString::fromStdString(filter->GetMessage())));
+                        return;
+                    }
+                    auto output = filter->GetOutput();
+                    if (!output) {
+                        showDarkFramelessMessage(QStringLiteral("反转面朝向"), QStringLiteral("输出对象为空"));
+                        return;
+                    }
+                    output->SetName(object->GetName() + "_Reversed");
+
+                    auto inputDraw = iGame::DynamicCast<iGame::DrawObject>(object);
+                    auto outDraw = iGame::DynamicCast<iGame::DrawObject>(output);
+                    if (inputDraw && outDraw) {
+                        outDraw->SetViewStyle(static_cast<IGenum>(inputDraw->GetViewStyle()));
+                    }
+
+                    modelTreeWidget->addDataObjectToModelTree(output, ItemSource::Algorithm);
+                    modelTreeWidget->updateCloudPicture();
+                    rendererWidget->update();
+                    dialog->close();
+                });
             });
 }
 

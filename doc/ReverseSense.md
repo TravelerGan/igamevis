@@ -23,3 +23,9 @@
 - `Examples/Filter/ReverseSense/TestReverseSenseSelfCheck.cpp`
 - `Examples/Models/AIGen_Surface_ReverseSenseDemo.obj`、`..._WaveSheet.obj`、`..._AxisFaces.obj`
 - `doc/FilterUserNotice/ReverseSenseFilter使用说明.md`
+
+## 属性与失败行为
+
+- 支持的数值属性按原始数组类型独立复制，64 位整数不经过浮点转换。
+- 不支持的数组类型会明确失败；失败时输出清空，不保留上次执行的结果。
+- 法向取反若超出原类型可表示范围，会失败并给出说明；关闭法向取反时可原样复制。

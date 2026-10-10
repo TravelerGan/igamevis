@@ -7,26 +7,51 @@
 #include "iGameSurfaceMesh.h"
 
 #include <vector>
+#include <limits>
+#include <type_traits>
 
 IGAME_NAMESPACE_BEGIN
 
 namespace {
 
-// 按输入数组的底层类型创建输出数组，避免属性复制时被统一转成 float。
-ArrayObject::Pointer CreateArrayOfSameType(ArrayObject* inArray) {
-    switch (inArray->GetArrayType()) {
-        case IG_DoubleArray: return DoubleArray::New();
-        case IG_IntArray:
-        case IG_INTARRAY: return IntArray::New();
-        case IG_UnsignedIntArray: return UnsignedIntArray::New();
-        case IG_CharArray: return CharArray::New();
-        case IG_UnsignedCharArray: return UnsignedCharArray::New();
-        case IG_ShortArray: return ShortArray::New();
-        case IG_UnsignedShortArray: return UnsignedShortArray::New();
-        case IG_LongLongArray: return LongLongArray::New();
-        case IG_UnsignedLongLongArray: return UnsignedLongLongArray::New();
-        case IG_FloatArray:
-        default: return FloatArray::New();
+// Copy through the native value type: converting integer IDs through double loses precision.
+template<class Array>
+ArrayObject::Pointer CopyTypedAttribute(ArrayObject* source, bool negate) {
+    auto input = DynamicCast<Array>(source);
+    if (!input) return nullptr;
+    auto output = Array::New();
+    output->DeepCopy(input);
+    if (negate) {
+        using Value = std::remove_reference_t<decltype(output->RawPointer()[0])>;
+        for (IGsize i = 0; i < output->GetNumberOfValues(); ++i) {
+            Value& value = output->RawPointer()[i];
+            if constexpr (std::is_integral_v<Value>) {
+                if constexpr (std::is_unsigned_v<Value>) {
+                    if (value != 0) return nullptr;
+                } else {
+                    if (value == std::numeric_limits<Value>::lowest()) return nullptr;
+                }
+            }
+            value = -value;
+        }
+    }
+    return output;
+}
+
+ArrayObject::Pointer CopyAttribute(ArrayObject* input, bool negate) {
+    switch (input->GetArrayType()) {
+        case IG_DoubleArray: return CopyTypedAttribute<DoubleArray>(input, negate);
+        case IG_IntArray: return CopyTypedAttribute<IntArray>(input, negate);
+        case IG_INTARRAY: return CopyTypedAttribute<IntArray>(input, negate);
+        case IG_UnsignedIntArray: return CopyTypedAttribute<UnsignedIntArray>(input, negate);
+        case IG_CharArray: return CopyTypedAttribute<CharArray>(input, negate);
+        case IG_UnsignedCharArray: return CopyTypedAttribute<UnsignedCharArray>(input, negate);
+        case IG_ShortArray: return CopyTypedAttribute<ShortArray>(input, negate);
+        case IG_UnsignedShortArray: return CopyTypedAttribute<UnsignedShortArray>(input, negate);
+        case IG_LongLongArray: return CopyTypedAttribute<LongLongArray>(input, negate);
+        case IG_UnsignedLongLongArray: return CopyTypedAttribute<UnsignedLongLongArray>(input, negate);
+        case IG_FloatArray: return CopyTypedAttribute<FloatArray>(input, negate);
+        default: return nullptr;
     }
 }
 
@@ -39,6 +64,7 @@ ReverseSenseFilter::ReverseSenseFilter() {
 
 bool ReverseSenseFilter::Execute() {
     m_Message.clear();
+    SetOutput(nullptr);
 
     auto input = DynamicCast<SurfaceMesh>(GetInput(0));
     if (input == nullptr) {
@@ -92,21 +118,11 @@ bool ReverseSenseFilter::Execute() {
                 if (attr.isDeleted || attr.pointer.IsNull()) { continue; }
 
                 auto inArray = attr.pointer;
-                auto outArray = CreateArrayOfSameType(inArray);
-                outArray->SetName(inArray->GetName());
-                const int dim = inArray->GetDimension();
-                outArray->SetDimension(dim);
-
-                const IGsize tupleNum = inArray->GetNumberOfElements();
-                outArray->Resize(tupleNum);
                 const bool negate = m_ReverseNormals && attr.type == IG_NORMAL;
-                std::vector<double> values(dim > 0 ? dim : 1);
-                for (IGsize t = 0; t < tupleNum; ++t) {
-                    inArray->GetElement(t, values);
-                    if (negate) {
-                        for (int d = 0; d < dim; ++d) { values[d] = -values[d]; }
-                    }
-                    outArray->SetElement(t, values.data());
+                auto outArray = CopyAttribute(inArray, negate);
+                if (!outArray) {
+                    m_Message = "Unsupported attribute type or normal value cannot be negated: " + inArray->GetName();
+                    return false;
                 }
 
                 const IGsize index =

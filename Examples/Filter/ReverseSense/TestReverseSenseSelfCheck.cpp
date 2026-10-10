@@ -11,6 +11,7 @@
 #include <iGameUnstructuredMesh.h>
 
 #include <cstdio>
+#include <limits>
 #include <vector>
 
 using namespace iGame;
@@ -247,6 +248,81 @@ void TestFailures() {
     }
 }
 
+// BUG: attributes went through double and silently changed 64-bit IDs above 2^53.
+// Trigger: multi-component point/cell arrays, including signed and unsigned extrema, then copy/extract.
+// Expected: exact native values, original type and independent buffers for every supported numeric type.
+// Fix commit: 待提交 (用户要求仅本地修改，不提交).
+template<class Array, class Value>
+void CheckExactAttributeCopy(Value first, Value second) {
+    auto src = MakeQuadSurface();
+    auto filter = ReverseSenseFilter::New();
+    auto point = Array::New(); point->SetName("ExactPoint"); point->SetDimension(2);
+    point->Resize(src->GetNumberOfPoints());
+    auto cell = Array::New(); cell->SetName("ExactCell"); cell->SetDimension(2);
+    cell->Resize(src->GetNumberOfFaces());
+    for (IGsize t = 0; t < point->GetNumberOfElements(); ++t) {
+        point->RawPointer(t)[0] = t % 2 ? second : first;
+        point->RawPointer(t)[1] = t % 2 ? first : second;
+    }
+    for (IGsize t = 0; t < cell->GetNumberOfElements(); ++t) {
+        cell->RawPointer(t)[0] = t % 2 ? second : first;
+        cell->RawPointer(t)[1] = t % 2 ? first : second;
+    }
+    src->GetAttributeSet()->AddAttribute(IG_SCALAR, IG_POINT, point);
+    src->GetAttributeSet()->AddAttribute(IG_VECTOR, IG_CELL, cell);
+    filter->SetInput(src);
+    Expect(filter->Execute(), "typed attribute Execute succeeds");
+    auto out = DynamicCast<SurfaceMesh>(filter->GetOutput());
+    if (!out) { Expect(false, "typed copy output exists"); return; }
+    auto p = DynamicCast<Array>(out->GetAttributeSet()->GetAttribute("ExactPoint").pointer);
+    auto c = DynamicCast<Array>(out->GetAttributeSet()->GetAttribute("ExactCell").pointer);
+    bool exact = p && c && p->GetNumberOfElements() == 4 && c->GetNumberOfElements() == 2;
+    for (IGsize t = 0; exact && t < p->GetNumberOfElements(); ++t)
+        for (int d = 0; d < 2; ++d) exact = exact && p->RawPointer(t)[d] == point->RawPointer(t)[d];
+    for (IGsize t = 0; exact && t < c->GetNumberOfElements(); ++t)
+        for (int d = 0; d < 2; ++d) exact = exact && c->RawPointer(t)[d] == cell->RawPointer(t)[d];
+    Expect(exact, "point/cell values and array types are exact after copy/extraction");
+    if (p && c) {
+        const auto originalPoint = point->RawPointer(0)[0];
+        const auto originalCell = cell->RawPointer(0)[0];
+        p->RawPointer(0)[0] = originalPoint == first ? second : first;
+        c->RawPointer(0)[0] = originalCell == first ? second : first;
+        Expect(point->RawPointer(0)[0] == originalPoint && cell->RawPointer(0)[0] == originalCell,
+               "changing the output does not change input attribute buffers");
+    }
+}
+
+void TestExactAttributes() {
+    std::printf("[case] native numeric attributes retain exact values\n");
+    CheckExactAttributeCopy<FloatArray>(1.25f, -2.5f);
+    CheckExactAttributeCopy<DoubleArray>(1.0 / 3.0, -2.25);
+    CheckExactAttributeCopy<IntArray>(std::numeric_limits<int>::max(), std::numeric_limits<int>::lowest());
+    CheckExactAttributeCopy<UnsignedIntArray>(std::numeric_limits<unsigned int>::max(), 0u);
+    CheckExactAttributeCopy<CharArray>(char(3), char(0));
+    CheckExactAttributeCopy<UnsignedCharArray>(static_cast<unsigned char>(255), static_cast<unsigned char>(0));
+    CheckExactAttributeCopy<ShortArray>(std::numeric_limits<short>::max(), std::numeric_limits<short>::lowest());
+    CheckExactAttributeCopy<UnsignedShortArray>(std::numeric_limits<unsigned short>::max(), static_cast<unsigned short>(0));
+    CheckExactAttributeCopy<LongLongArray>(9007199254740993LL, std::numeric_limits<long long>::lowest());
+    CheckExactAttributeCopy<UnsignedLongLongArray>(std::numeric_limits<unsigned long long>::max(), 9007199254740993ULL);
+}
+
+// BUG: repeated failure exposed the previous successful output; integer normal negation could overflow.
+// Expected: failures clear output and reject unrepresentable normal values; valid float normals still work.
+// Fix commit: 待提交.
+void TestReuseAndIntegerNormals() {
+    auto src = MakeQuadSurface(); auto f = ReverseSenseFilter::New(); f->SetInput(src);
+    Expect(f->Execute(), "reuse begins with a valid output");
+    f->SetInput(nullptr); Expect(!f->Execute() && !f->GetOutput(), "failed reuse does not expose stale output");
+    auto bad = IntArray::New(); bad->SetName("ExtremeNormals"); bad->SetDimension(3); bad->Resize(4);
+    bad->RawPointer(0)[0] = std::numeric_limits<int>::lowest();
+    src->GetAttributeSet()->AddAttribute(IG_NORMAL, IG_POINT, bad); f->SetInput(src);
+    Expect(!f->Execute() && !f->GetOutput(), "unrepresentable integer normal negation fails safely");
+    f->SetReverseNormals(false); Expect(f->Execute(), "extreme integer normal can be copied without negation");
+    auto out = DynamicCast<SurfaceMesh>(f->GetOutput());
+    auto copy = out ? DynamicCast<IntArray>(out->GetAttributeSet()->GetAttribute("ExtremeNormals").pointer) : nullptr;
+    Expect(copy && copy->RawPointer(0)[0] == std::numeric_limits<int>::lowest(), "disabled negation retains extreme normal exactly");
+}
+
 } // namespace
 
 int main() {
@@ -256,6 +332,8 @@ int main() {
     TestPolygon();
     TestAdjacency();
     TestFailures();
+    TestExactAttributes();
+    TestReuseAndIntegerNormals();
 
     std::printf("total checks: %d, failures: %d\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

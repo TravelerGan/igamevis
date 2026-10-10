@@ -577,6 +577,7 @@ igame_add_example(testDeformationCode Filter/Deformation/TestStressDeformationFi
 igame_add_example(testContourLine Filter/TestContourLine.cpp)
 igame_add_example(testGhostCellModel Filter/GhostCell/TestGhostCellModel.cpp)
 igame_add_example(testPlaneSamplingFilter Filter/TestPlaneSampling.cpp)
+igame_add_example(testExtractEnclosedPoints Filter/TestExtractEnclosedPoints.cpp)
 
 #        #5 +  е      #28    ײ       
 igame_add_example(testContourExtraction Filter/TestContourExtraction.cpp)

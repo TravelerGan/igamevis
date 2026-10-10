@@ -174,22 +174,42 @@ bool TubeFilter::Execute() {
         return id;
     };
 
-    for (const auto& path : paths) {
+    for (const auto& pathSource : paths) {
+        std::vector<Node> path = pathSource;
+        // 闭合路径检测：首尾节点重合（如方形折线 0→1→2→3→0），
+        // 要求去掉重复末尾点后至少剩 3 个节点，否则按开放路径处理。
+        bool closed = path.size() >= 4
+                      && (path.front().first - path.back().first).norm() < 1e-9;
+        if (closed) path.pop_back(); // 末尾点与首点重合，丢弃后按环处理
         const int n = static_cast<int>(path.size());
 
-        // 2.1 每段单位方向
-        std::vector<Vector3d> sd(n - 1);
+        // 2.1 每段单位方向；闭合路径多一段「末节点→首节点」
+        const int segCount = closed ? n : n - 1;
+        std::vector<Vector3d> sd(segCount);
         for (int i = 0; i < n - 1; ++i) {
             Vector3d d = path[i + 1].first - path[i].first;
             sd[i] = d.normalized();
         }
-        // 2.2 切线 T：内部点为相邻两段方向之和再归一化（与 VTK 一致）
+        if (closed) {
+            Vector3d d = path[0].first - path[n - 1].first;
+            sd[n - 1] = d.normalized();
+        }
+        // 2.2 切线 T：
+        //   开放路径：端点取相邻段方向，内部点为相邻两段方向之和再归一化（与 VTK 一致）
+        //   闭合路径：所有点按环取前后两段方向之和
         std::vector<Vector3d> T(n);
-        T[0] = sd[0];
-        T[n - 1] = sd[n - 2];
-        for (int i = 1; i < n - 1; ++i) {
-            Vector3d s = sd[i - 1] + sd[i];
-            T[i] = (s.norm() < 1e-12) ? sd[i] : s.normalized();
+        if (closed) {
+            for (int i = 0; i < n; ++i) {
+                Vector3d s = sd[(i - 1 + n) % n] + sd[i];
+                T[i] = (s.norm() < 1e-12) ? sd[i] : s.normalized();
+            }
+        } else {
+            T[0] = sd[0];
+            T[n - 1] = sd[n - 2];
+            for (int i = 1; i < n - 1; ++i) {
+                Vector3d s = sd[i - 1] + sd[i];
+                T[i] = (s.norm() < 1e-12) ? sd[i] : s.normalized();
+            }
         }
 
         // 2.3 第一个截面的 N、B
@@ -222,21 +242,24 @@ bool TubeFilter::Execute() {
             }
         }
 
-        // 2.6 相邻 ring 缝合：每个四边形拆 2 个三角形（法向朝外）
-        for (int i = 0; i < n - 1; ++i) {
+        // 2.6 相邻 ring 缝合：每个四边形拆 2 个三角形（法向朝外）；
+        //     闭合路径最后一个 ring 接回 ring[0]
+        const int stitchCount = closed ? n : n - 1;
+        for (int i = 0; i < stitchCount; ++i) {
+            const int j = (i + 1) % n;
             for (int k = 0; k < sides; ++k) {
                 int k2 = (k + 1) % sides;
                 igIndex A = ring[i][k];
                 igIndex Bp = ring[i][k2];
-                igIndex C = ring[i + 1][k2];
-                igIndex D = ring[i + 1][k];
+                igIndex C = ring[j][k2];
+                igIndex D = ring[j][k];
                 outFaces->AddCellId3(A, Bp, C);
                 outFaces->AddCellId3(A, C, D);
             }
         }
 
-        // 2.7 封端（三角形扇，法向朝外）
-        if (m_Capping) {
+        // 2.7 封端（三角形扇，法向朝外）；闭合路径无端点，不封端
+        if (m_Capping && !closed) {
             igIndex c0 = addOut(path[0].first, path[0].second);
             for (int k = 0; k < sides; ++k) {
                 int k2 = (k + 1) % sides;

@@ -96,6 +96,7 @@
 #include <IQWidgets/igQtExtractLocationWidget.h>
 #include <IQWidgets/igQtGlobalIdWidget.h>
 #include <IQWidgets/igQtLinearExtrusionWidget.h>
+#include <IQWidgets/igQtAxisAlignedReflectionWidget.h>
 #include <IQWidgets/igQtMergeVectorComponentsWidget.h>
 #include <IQWidgets/igQtModelClipWidget.h>
 #include <IQWidgets/igQtModelDrawWidget.h>
@@ -4907,6 +4908,75 @@ void igQtMainWindow::initAllFilters() {
     });
     bindDevelopmentAction("cell_mesh_metrics", [executeDevelopmentFilter]() {
         executeDevelopmentFilter(QStringLiteral("单元网格指标"), CellMeshMetricsFilter::New());
+    });
+    bindDevelopmentAction("axis_aligned_reflection", [this]() {
+        auto scene = rendererWidget->GetScene();
+        if (!scene || !scene->GetCurrentModel()) {
+            showDarkFramelessMessage(QStringLiteral("反射"), QStringLiteral("请先选择一个模型。"));
+            return;
+        }
+        auto input = scene->GetCurrentModel()->GetDataObject();
+        if (!DynamicCast<UnstructuredMesh>(input)) {
+            showDarkFramelessMessage(QStringLiteral("反射"),
+                                     QStringLiteral("当前版本仅支持非结构网格 (UnstructuredMesh)。"));
+            return;
+        }
+
+        // 首次打开：懒创建右侧 Dock，连接面板的 applyRequested 执行反射
+        if (m_axisAlignedReflectionDock == nullptr) {
+            m_axisAlignedReflectionDock = igQtAxisAlignedReflectionWidget::createDockWidget(this);
+            addDockWidget(Qt::RightDockWidgetArea, m_axisAlignedReflectionDock);
+            auto* reflectionWidget = qobject_cast<igQtAxisAlignedReflectionWidget*>(
+                    m_axisAlignedReflectionDock->widget());
+            connect(reflectionWidget, &igQtAxisAlignedReflectionWidget::applyRequested, this,
+                    [this, reflectionWidget]() {
+                        if (!m_axisAlignedReflectionFilter) return;
+                        m_axisAlignedReflectionFilter->SetPlane(reflectionWidget->plane());
+                        m_axisAlignedReflectionFilter->SetCenter(reflectionWidget->center());
+                        m_axisAlignedReflectionFilter->SetCopyInput(reflectionWidget->copyInput());
+                        m_axisAlignedReflectionFilter->SetFlipAllInputArrays(
+                                reflectionWidget->flipAllInputArrays());
+                        if (!m_axisAlignedReflectionFilter->Execute()) {
+                            showDarkFramelessMessage(QStringLiteral("反射"),
+                                                     QStringLiteral("反射执行失败，请检查输入网格和参数。"));
+                            return;
+                        }
+                        auto output = DynamicCast<UnstructuredMesh>(
+                                m_axisAlignedReflectionFilter->GetOutput());
+                        if (!output) {
+                            showDarkFramelessMessage(QStringLiteral("反射"),
+                                                     QStringLiteral("反射未生成有效的非结构网格。"));
+                            return;
+                        }
+                        const QString outputName =
+                                QStringLiteral("Reflect_%1").arg(m_axisAlignedReflectionCount);
+                        output->SetName(outputName.toStdString());
+                        if (!m_axisAlignedReflectionModel) {
+                            const int id = modelTreeWidget->addDataObjectToModelTree(output, Algorithm);
+                            m_axisAlignedReflectionModel =
+                                    rendererWidget->GetScene()->GetModelById(id);
+                        } else {
+                            m_axisAlignedReflectionModel->SetDataObject(output);
+                            modelTreeWidget->updateItemName(output);
+                            modelTreeWidget->updateAllAttriubute(output);
+                            modelTreeWidget->updateCurrentModelInfo();
+                        }
+                        rendererWidget->update();
+                    });
+        }
+
+        // 每次打开：为当前模型创建新 filter 并重置面板
+        m_axisAlignedReflectionFilter = AxisAlignedReflectionFilter::New();
+        m_axisAlignedReflectionFilter->SetInput(input);
+        m_axisAlignedReflectionModel = nullptr;
+        ++m_axisAlignedReflectionCount;
+
+        auto* reflectionWidget = qobject_cast<igQtAxisAlignedReflectionWidget*>(
+                m_axisAlignedReflectionDock->widget());
+        reflectionWidget->resetParameters();
+        m_axisAlignedReflectionDock->show();
+        m_axisAlignedReflectionDock->raise();
+        reflectionWidget->setFocus(Qt::OtherFocusReason);
     });
     bindDevelopmentAction("multiblock_surface_as_multiblock", [executeDevelopmentFilter]() {
         executeDevelopmentFilter(QStringLiteral("多块模型表面提取"), MultiBlockGeometryFilter::New());

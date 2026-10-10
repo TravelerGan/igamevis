@@ -23,6 +23,7 @@
 #include <QTimer>
 #include <array>
 #include "MyFilter/iGameExtractCellsByTypeFilter.h"
+#include "AxisAlignedReflection/iGameAxisAlignedReflectionFilter.h"
 #undef QT_NO_OPENGL
 
 class QMenu;
@@ -209,6 +210,11 @@ private:
     // 面板由用户点 X 关闭，关闭后再次打开复用同一面板（保留上次参数与结果节点）
     QDialog* m_linearExtrusionDialog = nullptr;
     igQtLinearExtrusionWidget* m_linearExtrusionWidget = nullptr;
+    // 轴对齐反射：右侧 Dock（首次打开懒创建）+ 当前 filter / 结果模型 / 执行计数
+    QDockWidget* m_axisAlignedReflectionDock = nullptr;
+    iGame::AxisAlignedReflectionFilter::Pointer m_axisAlignedReflectionFilter;
+    iGame::Model::Pointer m_axisAlignedReflectionModel;
+    int m_axisAlignedReflectionCount{0};
     std::array<int, static_cast<size_t>(LeftToolPanelId::Count)> m_leftToolTabByPanel{{-1, -1, -1, -1, -1, -1, -1, -1, -1, -1}};
 
     void relocateContentToLeftTab(QDockWidget* shell, QWidget* inner, const QString& title, LeftToolPanelId id,

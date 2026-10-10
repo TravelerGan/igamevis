@@ -575,6 +575,25 @@ igame_add_example(testIsoVolume Filter/TestIsoVolume.cpp)
 igame_add_example(testDeformation Filter/Deformation/TestStressDeformationFilter.cpp)
 igame_add_example(testDeformationCode Filter/Deformation/TestStressDeformationFilterCode.cpp)
 igame_add_example(testContourLine Filter/TestContourLine.cpp)
+igame_add_example(testMergeVectorComponents Filter/TestMergeVectorComponents.cpp)
+igame_add_example(testThresholdAndGenerateIds Filter/TestThresholdAndGenerateIds.cpp)
+igame_add_example(testMultiBlockGeometry Filter/TestMultiBlockGeometry.cpp)
+igame_add_example(testShrink Filter/Shrink/TestShrink.cpp)
+igame_add_example(testShrinkModel Filter/Shrink/TestShrinkModel.cpp)
+igame_add_example(testGenerateProcessIds Filter/TestGenerateProcessIds.cpp)
+igame_add_example(testCellMeshMetrics Filter/TestCellMeshMetrics.cpp)
+igame_add_example(testGhostDemo Filter/GhostCell/TestGhostDemo.cpp)
+igame_add_example(testBoundaryMeshQuality Filter/TestBoundaryMeshQuality.cpp)
+igame_add_example(testCleanToGridFilter Filter/TestCleanToGridFilter.cpp)
+# Modeling：线性拉伸（Linear Extrusion）
+igame_add_example(testLinearExtrusion Filter/TestLinearExtrusion.cpp)
+
+# Probe
+igame_add_example(testProbe Filter/Probe/TestProbe.cpp)
+
+# ������ #5 + �е����� #28 ���ײ�������
+igame_add_example(testCountCellVertices Filter/TestCountCellVertices.cpp)
+igame_add_example(testExtractEdges Filter/TestExtractEdges.cpp)
 igame_add_example(testGhostCellModel Filter/GhostCell/TestGhostCellModel.cpp)
 igame_add_example(testPlaneSamplingFilter Filter/TestPlaneSampling.cpp)
 igame_add_example(testExtractEnclosedPoints Filter/TestExtractEnclosedPoints.cpp)

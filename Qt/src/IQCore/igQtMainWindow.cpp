@@ -3677,8 +3677,50 @@ void igQtMainWindow::initAllFilters() {
    
 
     // 第二批开发入口与第一批并列，后续新增 filter 可添加到此菜单。
-    QMenu* developingFiltersBatch2 = ui->menu_filters->addMenu(QStringLiteral("开发中filter/第二批"));
+    QMenu* developingFiltersBatch2 = ui->menu_filters->addMenu(QStringLiteral("新增filter/第二批"));
     developingFiltersBatch2->setObjectName(QStringLiteral("menu_developing_filters_batch2"));
+
+    QAction* outlineAction = developingFiltersBatch2->addAction(QStringLiteral("生成包围盒 (Outline)"));
+    outlineAction->setObjectName(QStringLiteral("action_Outline"));
+    connect(outlineAction, &QAction::triggered, this, [this](bool) {
+        auto scene = rendererWidget->GetScene();
+        auto model = scene ? scene->GetCurrentModel() : nullptr;
+        if (!model) {
+            showDarkFramelessMessage(QStringLiteral("无可用模型"),
+                                     QStringLiteral("请先加载并在模型树中选择一个模型。"));
+            return;
+        }
+
+        auto input = model->GetDataObject();
+        if (!input) {
+            showDarkFramelessMessage(QStringLiteral("无可用模型"),
+                                     QStringLiteral("当前模型没有可用数据。"));
+            return;
+        }
+
+        auto filter = OutlineFilter::New();
+        filter->SetInput(input);
+        if (!filter->Execute()) {
+            showDarkFramelessMessage(QStringLiteral("生成包围盒失败"),
+                                     QString::fromStdString(filter->GetMessage()));
+            return;
+        }
+
+        auto output = DynamicCast<DrawObject>(filter->GetOutput());
+        if (!output) {
+            showDarkFramelessMessage(QStringLiteral("生成包围盒失败"),
+                                     QStringLiteral("包围盒输出为空或无法显示。"));
+            return;
+        }
+
+        // 将白色包围盒作为独立结果加入模型树
+        output->SetName(QStringLiteral("Outline_%1").arg(++m_outlineCount).toStdString());
+        output->SetViewStyle(IG_WIREFRAME);
+        output->SetLineColor(igm::vec3(1.0f, 1.0f, 1.0f));
+        output->SetLineWidth(2.0f);
+        modelTreeWidget->addDataObjectToModelTree(output, Algorithm);
+        rendererWidget->update();
+    });
 
      // 继承语义：首次执行新增模型树节点，再次执行更新结果节点
     QAction* linearExtrusion = developingFiltersBatch2->addAction(QStringLiteral("线性拉伸 (Linear Extrusion)"));

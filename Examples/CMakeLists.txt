@@ -637,6 +637,7 @@ igame_add_example(testGenerateGlobalIds Filter/GlobalIds/TestGenerateGlobalIds.c
 igame_add_example(testPointAndCellIds Filter/PointAndCellIds/TestPointAndCellIds.cpp)
 igame_add_example(testGenerateProcessIds Filter/TestGenerateProcessIds.cpp)
 igame_add_example(testAxisAlignedReflection Filter/AxisAlignedReflection/TestAxisAlignedReflection.cpp)
+igame_add_example(testOutline Filter/Outline/TestOutline.cpp)
 igame_add_example(testExtractComponent Filter/TestExtractComponent.cpp)
 igame_add_example(testMergeVectorComponents Filter/TestMergeVectorComponents.cpp)
 igame_add_example(testResampleToImage Filter/Convert/TestResampleToImage.cpp)

@@ -143,6 +143,8 @@ public:
     // Remote Model Library dialog (C/S package catalog and cache controls)
     igQtRemoteModelLibrary* remoteModelLibrary{nullptr};
 
+    int m_outlineCount{0};
+
 private slots:
     void updateRecentFilePaths();
     void updateColorBarShow();

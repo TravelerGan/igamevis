@@ -223,6 +223,7 @@ set(IGAME_BATCH1_EXAMPLES
     testRemoveGhostInformation testElevation testMaskPoints
     testFeatureEdges testFeatureEdgesVisualization testExtractSubset
     testOutlineCorners testProbe testConvertToVertex
+    testExtractCellsByType
 )
 
 # Regression: code-only checkouts omit LFS fixtures, so copying VTKfile-0.vtk
@@ -258,7 +259,8 @@ function(igame_register_example_test EXAMPLE_TARGET)
         if ("${EXAMPLE_TARGET}" STREQUAL "testCellCenterFilter" OR
             "${EXAMPLE_TARGET}" STREQUAL "testFeatureEdgesVisualization" OR
             "${EXAMPLE_TARGET}" STREQUAL "testExtractSubset" OR
-            "${EXAMPLE_TARGET}" STREQUAL "testConvertToVertex")
+            "${EXAMPLE_TARGET}" STREQUAL "testConvertToVertex" OR
+            "${EXAMPLE_TARGET}" STREQUAL "testExtractCellsByType")
             list(APPEND _BATCH1_ARGS --no-render)
         endif ()
         add_test(NAME ${EXAMPLE_TARGET}
@@ -577,12 +579,24 @@ igame_add_example(testMergeVectorComponents Filter/TestMergeVectorComponents.cpp
 igame_add_example(testThresholdAndGenerateIds Filter/TestThresholdAndGenerateIds.cpp)
 igame_add_example(testMultiBlockGeometry Filter/TestMultiBlockGeometry.cpp)
 igame_add_example(testShrink Filter/Shrink/TestShrink.cpp)
+igame_add_example(testShrinkModel Filter/Shrink/TestShrinkModel.cpp)
 igame_add_example(testGenerateProcessIds Filter/TestGenerateProcessIds.cpp)
 igame_add_example(testCellMeshMetrics Filter/TestCellMeshMetrics.cpp)
 igame_add_example(testGhostDemo Filter/GhostCell/TestGhostDemo.cpp)
-igame_add_example(testGhostCellModel Filter/GhostCell/TestGhostCellModel.cpp)
 igame_add_example(testBoundaryMeshQuality Filter/TestBoundaryMeshQuality.cpp)
+igame_add_example(testCleanToGridFilter Filter/TestCleanToGridFilter.cpp)
+# Modeling：线性拉伸（Linear Extrusion）
+igame_add_example(testLinearExtrusion Filter/TestLinearExtrusion.cpp)
+
+# Probe
+igame_add_example(testProbe Filter/Probe/TestProbe.cpp)
+
+# ������ #5 + �е����� #28 ���ײ�������
+igame_add_example(testCountCellVertices Filter/TestCountCellVertices.cpp)
+igame_add_example(testExtractEdges Filter/TestExtractEdges.cpp)
+igame_add_example(testGhostCellModel Filter/GhostCell/TestGhostCellModel.cpp)
 igame_add_example(testPlaneSamplingFilter Filter/TestPlaneSampling.cpp)
+igame_add_example(testExtractEnclosedPoints Filter/TestExtractEnclosedPoints.cpp)
 
 # 简单任务 #5 + 中等任务 #28 配套测试用例
 igame_add_example(testCountCellVertices Filter/TestCountCellVertices.cpp)
@@ -677,9 +691,13 @@ igame_add_example(testSurfaceNormalsFilter Filter/SurfaceNormals/TestSurfaceNorm
 igame_add_example(testVolumeMeshSimplification Filter/TestVolumeMeshSimplification.cpp)
 igame_add_example(testMeshTetrahedralize Filter/TestMeshTetrahedralize.cpp)
 
+# Warp By Scalar: displaces points along a normal by a point scalar array.
+igame_add_example(testWarpByScalar Filter/WarpByScalar/TestWarpByScalar.cpp)
+
 # First-batch standard filter examples (Elevation is registered above).
 igame_add_example(testPointCoordinates Filter/PointCoordinates/TestPointCoordinates.cpp)
 igame_add_example(testCellCenterFilter Filter/CellCenter/TestCellCenterFilter.cpp)
+igame_add_example(testExtractCellsByType Filter/MyFilter/TestExtractCellsByType.cpp)
 igame_add_example(testRandomVectors Filter/AttributeManipulation/TestRandomVectors.cpp)
 igame_add_example(testRemoveGhostInformation Filter/RemoveGhostInformation/TestRemoveGhostInformation.cpp)
 igame_add_example(testMaskPoints Filter/MaskPoints/TestMaskPoints.cpp)
@@ -695,6 +713,12 @@ igame_add_example(testExtractLocation Filter/DataProcessing/ExtractLocation/Test
 igame_add_example(testOverlappingCellsDetector Filter/DataProcessing/OverlappingCellsDetector/TestOverlappingCellsDetector.cpp)
 
 igame_add_example(testExtractLocationDrag Filter/DataProcessing/ExtractLocation/TestExtractLocationDrag.cpp)
+
+# Force Static Mesh: cached geometry (pinned to the frame that built the cache) + attribute updates.
+igame_add_example(testForceStaticMesh Filter/ForceStaticMesh/TestForceStaticMesh.cpp)
+
+# Append Attributes: merges point/cell attribute arrays from several inputs sharing the same layout.
+igame_add_example(testAppendAttributes Filter/AppendAttributes/TestAppendAttributes.cpp)
 
 get_property(IGAME_EXAMPLE_TARGETS DIRECTORY PROPERTY IGAME_EXAMPLE_TARGETS)
 if (NOT IGAME_EXAMPLE_TARGETS)

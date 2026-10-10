@@ -1,13 +1,17 @@
 #include <Subdivide/iGameSubdivide.h>
 
+#include <iGameArrayObject.h>
+#include <iGameAttributeSet.h>
 #include <iGameFileIO.h>
 #include <iGamePoints.h>
 #include <iGameSurfaceMesh.h>
 #include <iGameType.h>
 
+#include <algorithm>
 #include <iomanip>
 #include <iostream>
 #include <string>
+#include <vector>
 
 // SubdivideFilter 测试程序
 //   - 默认以相对路径加载 Models/subdivide_test.vtk（工作目录为 Examples，构建时 Models 会拷贝到输出目录）；
@@ -61,6 +65,36 @@ int main(int argc, char* argv[]) {
     std::cout << "\n========== Subdivide（1 级细分） ==========" << std::endl;
     std::cout << "输出: 点数 " << numPts
               << ", 面数 " << output->GetNumberOfFaces() << std::endl;
+
+    // 打印 PointData / CellData 清单，验证细分后属性不丢失
+    auto dumpAttributes = [](const char* tag, auto attrs) {
+        std::cout << "\n---------- " << tag << " ----------" << std::endl;
+        if (attrs == nullptr) { std::cout << "(无)" << std::endl; return; }
+        std::cout << "属性数: " << attrs->GetNumberOfElements() << std::endl;
+        for (int i = 0; i < attrs->GetNumberOfElements(); ++i) {
+            auto& a = attrs->GetElement(i);
+            iGame::ArrayObject::Pointer data = a.GetPointer();
+            if (data == nullptr) continue;
+            const int dim = data->GetDimension();
+            std::cout << "[" << data->GetName() << "] dim=" << dim
+                      << "，元组数=" << data->GetNumberOfElements() << "，前 8 个元组:";
+            const IGsize showN = std::min<IGsize>(data->GetNumberOfElements(), IGsize(8));
+            std::vector<double> buf(dim);
+            for (IGsize k = 0; k < showN; ++k) {
+                data->GetElement(k, buf.data());
+                std::cout << " (";
+                for (int d = 0; d < dim; ++d) {
+                    if (d) std::cout << ",";
+                    std::cout << buf[d];
+                }
+                std::cout << ")";
+            }
+            std::cout << std::endl;
+        }
+    };
+    auto outAttrSet = output->GetAttributeSet();
+    dumpAttributes("PointData", outAttrSet->GetAllPointAttributes());
+    dumpAttributes("CellData", outAttrSet->GetAllCellAttributes());
 
     std::cout << "\n---------- 所有点位置 ----------" << std::endl;
     std::cout << std::fixed << std::setprecision(6);

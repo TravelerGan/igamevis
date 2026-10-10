@@ -18,7 +18,7 @@ namespace {
 //   nOldPts            : 旧顶点数量（输出点 0..nOldPts-1 为旧点）
 //   mids[t]            : 第 t 个中点对应的两个端点（当前轮点 id）
 //                        该中点的输出点 id = nOldPts + t
-// 与 ParaView 一致：只插值 PointData；细分后单元数变化，不复制 CellData。
+// 旧点取自身、中点取两端平均。
 // ============================================================
 void InterpolatePointAttributes(AttributeSet* src, AttributeSet* dst,
                                 int nOldPts,
@@ -63,6 +63,43 @@ void InterpolatePointAttributes(AttributeSet* src, AttributeSet* dst,
 }
 
 // ============================================================
+// 单元属性继承：一个面 1-to-4 后，4 个子三角形全部继承父面的
+// CellData（非三角面先做三角扇拆分，所有子面同样继承原面）。
+//   faceOfOutCell[k] : 第 k 个输出面来自哪个输入面
+// 多代细分时每代都继承，CellData 不会丢失。
+// ============================================================
+void InheritCellAttributes(AttributeSet* src, AttributeSet* dst,
+                           const std::vector<int>& faceOfOutCell,
+                           int nOutCells) {
+    if (src == nullptr || dst == nullptr) return;
+    auto cellAttrs = src->GetAllCellAttributes();
+    if (cellAttrs == nullptr) return;
+
+    for (int i = 0; i < cellAttrs->GetNumberOfElements(); ++i) {
+        AttributeSet::Attribute& inAttr = cellAttrs->GetElement(i);
+        if (inAttr.IsDeleted()) continue;
+
+        ArrayObject::Pointer inData = inAttr.GetPointer();
+        if (inData == nullptr) continue;
+
+        const int dim = inData->GetDimension();
+        DoubleArray::Pointer nd = DoubleArray::New();
+        nd->SetName(inData->GetName());
+        nd->SetDimension(dim);
+        nd->Resize(nOutCells);
+
+        std::vector<double> vf(dim);
+        for (int k = 0; k < nOutCells; ++k) {
+            const int parent = faceOfOutCell[static_cast<size_t>(k)];
+            inData->GetElement(parent, vf.data());
+            nd->SetElement(k, vf.data());
+        }
+
+        dst->AddAttribute(inAttr.GetType(), IG_CELL, nd, inAttr.GetDataRange());
+    }
+}
+
+// ============================================================
 // 一轮线性 1-to-4 细分，返回新的 SurfaceMesh
 // ============================================================
 SurfaceMesh::Pointer SubdivideOnce(SurfaceMesh* mesh) {
@@ -80,6 +117,8 @@ SurfaceMesh::Pointer SubdivideOnce(SurfaceMesh* mesh) {
     // 边 -> 中点 id；中点端点记录（用于点属性插值）
     std::unordered_map<long long, int> edgeMid;
     std::vector<std::pair<int, int>> midEndpoints;
+    // 每个输出面来自哪个输入面（用于 CellData 继承）
+    std::vector<int> faceOfOutCell;
 
     auto edgeKey = [](int a, int b) -> long long {
         if (a > b) { int t = a; a = b; b = t; }
@@ -107,6 +146,12 @@ SurfaceMesh::Pointer SubdivideOnce(SurfaceMesh* mesh) {
 
     igIndex ptIds[IGAME_CELL_MAX_SIZE]{};
 
+    // 记录输出面的同时登记其父面，供 CellData 继承
+    auto addOutFace = [&](igIndex a, igIndex b, igIndex c, int parentFace) {
+        outFaces->AddCellId3(a, b, c);
+        faceOfOutCell.push_back(parentFace);
+    };
+
     for (int f = 0; f < nFaces; ++f) {
         const int npts = mesh->GetFacePointIds(f, ptIds);
         if (npts < 3) continue;
@@ -126,18 +171,18 @@ SurfaceMesh::Pointer SubdivideOnce(SurfaceMesh* mesh) {
             const int Mbc = getMid(B, C);
 // 四个子三角形的顶点排列严格对齐 VTK GenerateSubdivisionCells：
 //   edgePts[0]=Mca(C-A), edgePts[1]=Mab(A-B), edgePts[2]=Mbc(B-C)
-            outFaces->AddCellId3(static_cast<igIndex>(A),
-                                 static_cast<igIndex>(Mab),
-                                 static_cast<igIndex>(Mca));   // 1: A, Mab, Mca
-            outFaces->AddCellId3(static_cast<igIndex>(Mab),
-                                 static_cast<igIndex>(B),
-                                 static_cast<igIndex>(Mbc));   // 2: Mab, B, Mbc
-            outFaces->AddCellId3(static_cast<igIndex>(Mbc),
-                                 static_cast<igIndex>(C),
-                                 static_cast<igIndex>(Mca));   // 3: Mbc, C, Mca
-            outFaces->AddCellId3(static_cast<igIndex>(Mab),
-                                 static_cast<igIndex>(Mbc),
-                                 static_cast<igIndex>(Mca));   // 4: Mab, Mbc, Mca
+            addOutFace(static_cast<igIndex>(A),
+                       static_cast<igIndex>(Mab),
+                       static_cast<igIndex>(Mca), f);   // 1: A, Mab, Mca
+            addOutFace(static_cast<igIndex>(Mab),
+                       static_cast<igIndex>(B),
+                       static_cast<igIndex>(Mbc), f);   // 2: Mab, B, Mbc
+            addOutFace(static_cast<igIndex>(Mbc),
+                       static_cast<igIndex>(C),
+                       static_cast<igIndex>(Mca), f);   // 3: Mbc, C, Mca
+            addOutFace(static_cast<igIndex>(Mab),
+                       static_cast<igIndex>(Mbc),
+                       static_cast<igIndex>(Mca), f);   // 4: Mab, Mbc, Mca
         }
 
 
@@ -150,6 +195,10 @@ SurfaceMesh::Pointer SubdivideOnce(SurfaceMesh* mesh) {
     InterpolatePointAttributes(mesh->GetAttributeSet(), out->GetAttributeSet(),
                                nOldPts, midEndpoints,
                                static_cast<int>(outPts->GetNumberOfPoints()));
+
+    InheritCellAttributes(mesh->GetAttributeSet(), out->GetAttributeSet(),
+                          faceOfOutCell,
+                          static_cast<int>(outFaces->GetNumberOfCells()));
 
     out->GetAttributeSet()->Modified();
     out->Modified();

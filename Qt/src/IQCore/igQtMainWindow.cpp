@@ -22,6 +22,7 @@
 #include "Selection/iGameExtractCellsByRegionFilter.h"
 #include "Transformation/iGameTransformFilter.h"
 #include "VolumeOfRevolution/iGameVolumeOfRevolutionFilter.h"
+#include "WarpByScalar/iGameWarpByScalarFilter.h"
 #include "Deformation/iGameStressDeformationFilterCode.h"
 #include "ExtractEnclosedPoints/iGameExtractEnclosedPointsFilter.h"
 
@@ -4580,6 +4581,172 @@ void igQtMainWindow::initAllFilters() {
     auto forceStaticDevelopmentFilter = ForceStaticMeshFilter::New();
     bindDevelopmentAction("force_static_mesh", [executeDevelopmentFilter, forceStaticDevelopmentFilter]() {
         executeDevelopmentFilter(QStringLiteral("强制静态网格"), forceStaticDevelopmentFilter);
+    });
+
+    // 开发中filter/第二批入口。
+    // ---------- 按标量变形 (Warp By Scalar) ----------
+    QAction* warpScalarAction =
+            developingFiltersBatch2->addAction(QStringLiteral("按标量变形 (Warp By Scalar)"));
+    warpScalarAction->setData(QStringLiteral("warp_by_scalar"));
+    connect(warpScalarAction, &QAction::triggered, this, [this](bool) {
+        // 变形过滤器只改写点坐标，因此只接受点集派生类型
+        auto resolveWarpInput = [this](DataObject::Pointer& obj, const QString& title) -> bool {
+            obj = nullptr;
+            auto scene = rendererWidget->GetScene();
+            if (scene == nullptr || scene->GetCurrentModel() == nullptr) {
+                showDarkFramelessMessage(title, QStringLiteral("请先在模型树中选择一个模型。"));
+                return false;
+            }
+            obj = scene->GetCurrentModel()->GetDataObject();
+            if (!obj) {
+                showDarkFramelessMessage(title, QStringLiteral("当前模型没有可用的数据对象。"));
+                return false;
+            }
+            const IGenum type = obj->GetDataObjectType();
+            if (type != IG_POINT_SET && type != IG_SURFACE_MESH && type != IG_VOLUME_MESH &&
+                type != IG_UNSTRUCTURED_MESH && type != IG_STRUCTURED_MESH) {
+                showDarkFramelessMessage(
+                        title, QStringLiteral("该算法只支持点集 / 表面网格 / 体网格 / 非结构网格 / 结构网格。"));
+                return false;
+            }
+            return true;
+        };
+
+        struct WarpArrayInfo {
+            QString name;
+            int dimension{1};
+            QString typeName;
+        };
+        auto collectPointArrays = [](DataObject::Pointer obj, std::vector<WarpArrayInfo>& out) {
+            auto attrSet = obj->GetAttributeSet();
+            if (!attrSet) { return; }
+            auto attrs = attrSet->GetAllPointAttributes();
+            if (!attrs) { return; }
+            for (IGsize i = 0; i < attrs->GetNumberOfElements(); ++i) {
+                auto& attr = attrs->GetElement(i);
+                if (attr.IsNone() || !attr.pointer) { continue; }
+                WarpArrayInfo info;
+                info.name = QString::fromStdString(attr.pointer->GetName());
+                info.dimension = attr.pointer->GetDimension();
+                switch (attr.type) {
+                    case IG_SCALAR:
+                        info.typeName = QStringLiteral("标量");
+                        break;
+                    case IG_VECTOR:
+                        info.typeName = QStringLiteral("向量");
+                        break;
+                    case IG_NORMAL:
+                        info.typeName = QStringLiteral("法向");
+                        break;
+                    case IG_TCOORD:
+                        info.typeName = QStringLiteral("纹理坐标");
+                        break;
+                    case IG_TENSOR:
+                        info.typeName = QStringLiteral("张量");
+                        break;
+                    default:
+                        info.typeName = QStringLiteral("属性");
+                        break;
+                }
+                out.push_back(info);
+            }
+        };
+        DataObject::Pointer obj = nullptr;
+        if (!resolveWarpInput(obj, QStringLiteral("按标量变形"))) { return; }
+
+        std::vector<WarpArrayInfo> arrays;
+        collectPointArrays(obj, arrays);
+        if (arrays.empty()) {
+            showDarkFramelessMessage(QStringLiteral("按标量变形"),
+                                     QStringLiteral("当前模型没有点属性数组，无法按标量变形。\n"
+                                                    "可以先用「转换为点数据」把单元属性转到点上。"));
+            return;
+        }
+        std::vector<QString> items;
+        for (const auto& a: arrays) {
+            items.push_back(QStringLiteral("%1 (%2, %3 分量)").arg(a.name, a.typeName).arg(a.dimension));
+        }
+
+        igQtFilterDialogDockWidget* dialog = new igQtFilterDialogDockWidget(this, true);
+        dialog->setFilterTitle(QStringLiteral("按标量变形 (Warp By Scalar)"));
+        dialog->setFilterDescription(QStringLiteral("沿法向按标量值移动点：x' = x + n * s * 缩放系数。\n"
+                                                    "未勾选「使用指定法向」时优先使用输入的点法向数组，"
+                                                    "缺失时退回下面的法向。"));
+        int arrayId = dialog->addParameter(igQtFilterDialogDockWidget::QT_COMBO_BOX,
+                                           QStringLiteral("标量数组 (Scalars)"), items);
+        int scaleId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                           QStringLiteral("缩放系数 (Scale Factor)"), "1.0");
+        int useNormalId = dialog->addParameter(igQtFilterDialogDockWidget::QT_CHECK_BOX,
+                                               QStringLiteral("使用指定法向 (Use Normal)"), "false");
+        int nxId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                        QStringLiteral("法向 X (Normal X)"), "0.0");
+        int nyId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                        QStringLiteral("法向 Y (Normal Y)"), "0.0");
+        int nzId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                        QStringLiteral("法向 Z (Normal Z)"), "1.0");
+        int xyPlaneId = dialog->addParameter(igQtFilterDialogDockWidget::QT_CHECK_BOX,
+                                             QStringLiteral("XY 平面模式 (XY Plane)"), "false");
+
+        dialog->setFixedWidth(360);
+        if (auto* sa = dialog->findChild<QScrollArea*>(QStringLiteral("scrollArea"))) {
+            sa->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        }
+        dialog->show();
+
+        dialog->setApplyFunctor([=, this]() {
+            bool ok = false;
+            const int choice = dialog->getComboIndex(arrayId, ok);
+            if (!ok || choice < 0 || choice >= static_cast<int>(arrays.size())) {
+                showDarkFramelessMessage(QStringLiteral("按标量变形"), QStringLiteral("请选择有效的标量数组。"));
+                return;
+            }
+            const double scale = dialog->getDouble(scaleId, ok);
+            if (!ok) {
+                showDarkFramelessMessage(QStringLiteral("按标量变形"), QStringLiteral("缩放系数必须是数值。"));
+                return;
+            }
+            const double nx = dialog->getDouble(nxId, ok);
+            if (!ok) {
+                showDarkFramelessMessage(QStringLiteral("按标量变形"), QStringLiteral("法向 X 必须是数值。"));
+                return;
+            }
+            const double ny = dialog->getDouble(nyId, ok);
+            if (!ok) {
+                showDarkFramelessMessage(QStringLiteral("按标量变形"), QStringLiteral("法向 Y 必须是数值。"));
+                return;
+            }
+            const double nz = dialog->getDouble(nzId, ok);
+            if (!ok) {
+                showDarkFramelessMessage(QStringLiteral("按标量变形"), QStringLiteral("法向 Z 必须是数值。"));
+                return;
+            }
+            const bool useNormal = dialog->getChecked(useNormalId, ok);
+            const bool xyPlane = dialog->getChecked(xyPlaneId, ok);
+
+            auto filter = WarpByScalar::New();
+            filter->SetScalarsArrayName(arrays[static_cast<size_t>(choice)].name.toStdString());
+            filter->SetScaleFactor(scale);
+            filter->SetUseNormal(useNormal);
+            filter->SetNormal(nx, ny, nz);
+            filter->SetXYPlane(xyPlane);
+            filter->SetInput(obj);
+            if (!filter->Execute()) {
+                showDarkFramelessMessage(QStringLiteral("按标量变形"),
+                                         QStringLiteral("变形失败：请检查标量数组与法向设置。"));
+                return;
+            }
+            auto output = filter->GetOutput();
+            if (!output) {
+                showDarkFramelessMessage(QStringLiteral("按标量变形"), QStringLiteral("算法未产生有效结果。"));
+                return;
+            }
+            output->SetName(obj->GetName() + "_warp_scalar");
+            modelTreeWidget->addDataObjectToModelTree(output, Algorithm);
+            rendererWidget->GetScene()->Modified();
+            rendererWidget->GetScene()->Update();
+            rendererWidget->update();
+            dialog->close();
+        });
     });
 
     QMenu* developingConvert = developingFilters->addMenu(QStringLiteral("数据转换 (Convert)"));
